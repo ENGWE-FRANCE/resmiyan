@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Réservations | MIYAN</title>
+<style>
+  :root { --bdx:#520D10; --deep:#2a0708; --cream:#F4E5C4; --gold:#C49A3A; --paper:#FBF3DF; --ok:#2e7d32; --full:#a3000b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--deep); color:var(--bdx); font-family:"Work Sans",system-ui,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  header { display:flex; align-items:center; justify-content:space-between; color:var(--cream); padding:6px 2px 18px; flex-wrap:wrap; gap:10px; }
+  .logo { font-weight:900; letter-spacing:.12em; font-size:20px; }
+  .status { display:flex; align-items:center; gap:8px; font-size:13px; opacity:.85; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--ok); }
+  .dot.stale { background:var(--gold); }
+  .dot.err { background:var(--full); }
+  .toolbar { background:var(--cream); border-radius:14px; padding:12px 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; box-shadow:0 0 0 1px var(--gold) inset; margin-bottom:14px; }
+  .toolbar label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+  input[type=date], input[type=password] { font:inherit; font-size:14px; padding:7px 9px; border-radius:8px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); }
+  button { font:inherit; font-weight:700; border:0; border-radius:999px; padding:8px 16px; cursor:pointer; background:var(--bdx); color:var(--cream); }
+  .summary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .pill { background:var(--paper); border-radius:12px; padding:10px 14px; font-size:13px; box-shadow:0 0 0 1px var(--gold) inset; }
+  .pill b { display:block; font-size:18px; }
+  table { width:100%; border-collapse:collapse; background:var(--cream); border-radius:14px; overflow:hidden; box-shadow:0 0 0 1px var(--gold) inset; }
+  th, td { text-align:left; padding:9px 10px; font-size:13px; border-bottom:1px solid rgba(82,13,16,.12); }
+  th { text-transform:uppercase; font-size:11px; letter-spacing:.06em; opacity:.7; }
+  tr.cancelled { opacity:.45; text-decoration:line-through; }
+  tr.fresh { animation: flash 2.2s ease; }
+  @keyframes flash { from { background:var(--gold); } to { background:transparent; } }
+  .empty { padding:30px; text-align:center; color:var(--cream); opacity:.75; }
+  .err { color:var(--cream); background:var(--full); padding:10px 14px; border-radius:10px; margin-bottom:14px; }
+  .gate { max-width:360px; margin:80px auto; background:var(--cream); border-radius:16px; padding:22px; box-shadow:0 0 0 1px var(--gold) inset; }
+  .gate h1 { font-size:18px; margin:0 0 12px; }
+  .gate input { width:100%; margin-bottom:10px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">MIYAN · Réservations</div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">—</span></div>
+  </header>
+
+  <div class="gate" id="gate">
+    <h1>Accès admin</h1>
+    <input type="password" id="gateKey" placeholder="Clé admin" autocomplete="off">
+    <button type="button" id="gateGo">Entrer</button>
+  </div>
+
+  <div id="app" hidden>
+    <div class="toolbar">
+      <label for="date">Date</label>
+      <input type="date" id="date">
+      <button type="button" id="today">Aujourd'hui</button>
+      <button type="button" id="refresh">Rafraîchir</button>
+      <button type="button" id="signout" style="background:transparent;color:var(--cream);opacity:.6;">Déconnexion</button>
+    </div>
+
+    <div class="summary" id="summary"></div>
+    <div class="err" id="err" hidden></div>
+
+    <table>
+      <thead>
+        <tr><th>Heure</th><th>Service</th><th>Couverts</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Note</th><th>Statut</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>Aucune réservation pour cette date.</div>
+  </div>
+</div>
+
+<script>
+/* ═══ À RENSEIGNER : même URL Apps Script que reservation.html (se termine par /exec) ═══ */
+const API_URL = 'COLLER_ICI_URL_APPS_SCRIPT';
+/* ══════════════════════════════════════════════════════════════════════════════════════ */
+
+const POLL_MS = 8000;
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, '0');
+const isoToday = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+
+let adminKey = localStorage.getItem('miyan_admin_key') || '';
+let knownIds = new Set();
+let firstLoad = true;
+let timer = null;
+
+function setStatus(mode, text) {
+  $('dot').className = 'dot' + (mode ? ' ' + mode : '');
+  $('statusText').textContent = text;
+}
+
+async function fetchList() {
+  const date = $('date').value || isoToday();
+  const url = API_URL + '?' + new URLSearchParams({ action: 'list', key: adminKey, date });
+  const res = await fetch(url).then(r => r.json());
+  return res;
+}
+
+function summarize(reservations, cfg) {
+  const box = $('summary'); box.textContent = '';
+  const active = reservations.filter(r => r.status !== 'cancelled');
+  const byService = {};
+  active.forEach(r => { byService[r.service] = (byService[r.service] || 0) + Number(r.party); });
+  const totalCovers = active.reduce((s, r) => s + Number(r.party), 0);
+  const pill = (label, value) => { const d = document.createElement('div'); d.className = 'pill'; d.innerHTML = `${label}<b>${value}</b>`; box.append(d); };
+  pill('Réservations', active.length);
+  pill('Couverts', totalCovers);
+  (cfg.services || []).forEach(s => pill(s.label || s.id, (byService[s.id] || 0) + ' / ' + (s.capacity ?? cfg.capacityPerSlot ?? '?') + ' par créneau'));
+}
+
+function render(reservations) {
+  const tbody = $('rows'); tbody.textContent = '';
+  $('empty').hidden = reservations.length > 0;
+  const nowIds = new Set();
+  reservations.forEach(r => {
+    nowIds.add(r.id);
+    const tr = document.createElement('tr');
+    tr.className = (r.status === 'cancelled' ? 'cancelled ' : '') + (!firstLoad && !knownIds.has(r.id) ? 'fresh' : '');
+    tr.innerHTML = `<td>${r.time}</td><td>${r.service}</td><td>${r.party}</td><td>${escapeHtml(r.name)}</td>` +
+      `<td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.note || '')}</td>` +
+      `<td>${r.status === 'cancelled' ? 'Annulée' : 'Confirmée'}</td>`;
+    tbody.append(tr);
+  });
+  knownIds = nowIds;
+  firstLoad = false;
+}
+
+function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+async function poll() {
+  try {
+    const res = await fetchList();
+    if (!res.ok) {
+      if (res.error === 'unauthorized') return showGate('Clé admin incorrecte.');
+      setStatus('err', 'Erreur : ' + res.error);
+      return;
+    }
+    $('err').hidden = true;
+    render(res.reservations);
+    summarize(res.reservations, res.config || {});
+    setStatus('', 'À jour · ' + new Date().toLocaleTimeString('fr-FR'));
+  } catch (e) {
+    setStatus('err', 'Connexion impossible');
+  }
+}
+
+function startPolling() {
+  clearInterval(timer);
+  poll();
+  timer = setInterval(poll, POLL_MS);
+}
+
+function showGate(message) {
+  $('app').hidden = true; $('gate').hidden = false;
+  if (message) { $('err').hidden = false; $('err').textContent = message; }
+  clearInterval(timer);
+}
+
+function showApp() {
+  $('gate').hidden = true; $('app').hidden = false;
+}
+
+$('gateGo').addEventListener('click', () => {
+  adminKey = $('gateKey').value.trim();
+  if (!adminKey) return;
+  localStorage.setItem('miyan_admin_key', adminKey);
+  firstLoad = true; knownIds = new Set();
+  showApp();
+  startPolling();
+});
+$('refresh').addEventListener('click', poll);
+$('today').addEventListener('click', () => { $('date').value = isoToday(); firstLoad = true; poll(); });
+$('date').addEventListener('change', () => { firstLoad = true; poll(); });
+$('signout').addEventListener('click', () => { localStorage.removeItem('miyan_admin_key'); adminKey = ''; showGate(); });
+
+$('date').value = isoToday();
+if (adminKey) { showApp(); startPolling(); } else { showGate(); }
+</script>
+</body>
+</html>
