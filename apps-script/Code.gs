@@ -64,7 +64,8 @@ function getConfig() {
     services: JSON.parse(c.servicesJson || '[{"id":"midi","label":"Midi","start":"12:00","end":"14:00"},{"id":"soir","label":"Soir","start":"19:00","end":"22:00"}]'),
     closedWeekdays: JSON.parse(c.closedWeekdays || '[1]'),
     closedDates: String(c.closedDates || '').split(',').map(s => s.trim()).filter(Boolean),
-    adminKey: String(c.adminKey || '')
+    adminKey: String(c.adminKey || ''),
+    notifyEmails: String(c.notifyEmails || c.email || '').split(',').map(s => s.trim()).filter(Boolean)
   };
 }
 
@@ -180,7 +181,9 @@ function createReservation(data) {
       String(data.note || '').trim(), String(data.lang || 'fr'), 'confirmed', cancelToken
     ]);
 
-    sendConfirmationEmail_(cfg, { id, date, time, service, party, name, email, lang: data.lang, cancelToken });
+    const r = { id, date, time, service, party, name, phone, email, note: data.note, lang: data.lang, cancelToken };
+    sendConfirmationEmail_(cfg, r);
+    sendStaffNotification_(cfg, r);
     return { ok: true, id };
   } finally {
     lock.releaseLock();
@@ -195,6 +198,18 @@ function sendConfirmationEmail_(cfg, r) {
     ? `Bonjour ${r.name},\n\nVotre table est réservée :\n${r.date} à ${r.time} — ${r.party} personne(s)\nRéférence : ${r.id}\n\nPour annuler : ${cancelUrl}\n\nÀ bientôt,\nMIYAN — 62 rue du Faubourg Montmartre, 75009 Paris`
     : `Hello ${r.name},\n\nYour table is booked:\n${r.date} at ${r.time} — ${r.party} guest(s)\nReference: ${r.id}\n\nTo cancel: ${cancelUrl}\n\nSee you soon,\nMIYAN — 62 rue du Faubourg Montmartre, 75009 Paris`;
   MailApp.sendEmail({ to: r.email, replyTo: cfg.email || undefined, subject, body });
+}
+
+// Email à l'équipe (Config.notifyEmails, ou Config.email si vide) à chaque nouvelle réservation,
+// pour confirmer côté restaurant sans avoir besoin d'admin.html ouvert.
+function sendStaffNotification_(cfg, r) {
+  if (!cfg.notifyEmails.length) return;
+  const serviceLabel = (r.service && r.service.label) || (r.service && r.service.id) || '';
+  const subject = `Nouvelle réservation — ${r.date} ${r.time} (${r.party} pers.)`;
+  const body = `${r.name} — ${r.phone} — ${r.email}\n${r.date} à ${r.time} (${serviceLabel}) — ${r.party} personne(s)\nRéférence : ${r.id}` +
+    (r.note ? `\nNote : ${r.note}` : '') +
+    `\n\nVoir le tableau de bord : ${ScriptApp.getService().getUrl()}`;
+  MailApp.sendEmail({ to: cfg.notifyEmails.join(','), subject, body });
 }
 
 /* ───────────────────────── Annulation ───────────────────────── */
@@ -274,6 +289,7 @@ function setupSpreadsheet() {
       ['maxDays', 30],
       ['phone', '+33 1 00 00 00 00'],
       ['email', 'contact@miyan.fr'],
+      ['notifyEmails', ''],
       ['timezone', 'Europe/Paris'],
       ['slotMinutes', 15],
       ['capacityPerSlot', 20],

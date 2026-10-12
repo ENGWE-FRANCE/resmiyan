@@ -54,6 +54,15 @@ La jauge limite le nombre total de couverts acceptés sur un même créneau de 1
 - Le Google Sheet reste consultable directement par l'équipe si besoin (lecture simple), en complément du tableau de bord `admin.html`.
 - Aucune autre intégration Google n'est requise pour le moment ; un export/sync vers Google Calendar est possible ensuite si utile, en ajoutant un appel `CalendarApp` dans `createReservation` côté `Code.gs`.
 
+## Emails
+
+Deux envois automatiques à chaque réservation, tous les deux via `MailApp` (le compte Google qui a déployé le script — pas de service externe à connecter) :
+
+- **Au client** : confirmation immédiate avec référence et lien d'annulation (`sendConfirmationEmail_`).
+- **À l'équipe** : notification "Nouvelle réservation" avec nom, téléphone, email, créneau et lien vers le tableau de bord (`sendStaffNotification_`) — pour savoir qu'une réservation est bien arrivée sans avoir `admin.html` ouvert.
+
+Destinataires de la notification équipe : `Config.notifyEmails` (une ou plusieurs adresses séparées par des virgules). Si la cellule est vide, elle retombe sur `Config.email`. Aucune limite de connexion externe : c'est le quota d'envoi du compte Google (très large pour un volume de réservations d'un restaurant) qui s'applique.
+
 ## Hébergement : GitHub Pages suffit (Netlify optionnel)
 
 `reservation.html` et `admin.html` sont des pages 100 % statiques : tout le code tourne dans le navigateur et appelle directement l'URL Apps Script en `fetch`. Il n'y a pas de serveur à faire tourner, donc pas besoin de Netlify.
