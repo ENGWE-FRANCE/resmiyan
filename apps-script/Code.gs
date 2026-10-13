@@ -204,26 +204,75 @@ function createReservation(data) {
   }
 }
 
+// Couleurs reprises de reservation.html / admin.html, pour que l'email ressemble au site.
+const EMAIL_COLORS_ = { bg: '#2a0708', card: '#F4E5C4', paper: '#FBF3DF', ink: '#520D10', gold: '#C49A3A' };
+
+function escapeHtml_(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Date longue dans la langue de la réservation, ex. "mardi 13 octobre" / "Tuesday 13 October".
+function longDate_(dateStr, fr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  return new Intl.DateTimeFormat(fr ? 'fr-FR' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'long' }).format(d);
+}
+
+function emailShell_(bodyHtml) {
+  const c = EMAIL_COLORS_;
+  return `<div style="background:${c.bg};padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">` +
+    `<div style="max-width:480px;margin:0 auto;background:${c.card};border-radius:16px;padding:28px 24px;border:1px solid ${c.gold};">` +
+    `<div style="color:${c.ink};font-weight:900;letter-spacing:.08em;font-size:18px;margin:0 0 18px;">米安 MIYAN</div>` +
+    bodyHtml +
+    `</div></div>`;
+}
+
 function sendConfirmationEmail_(cfg, r) {
+  const c = EMAIL_COLORS_;
   const cancelUrl = ScriptApp.getService().getUrl() + '?action=cancel&id=' + encodeURIComponent(r.id) + '&token=' + encodeURIComponent(r.cancelToken);
   const fr = r.lang !== 'en';
-  const subject = fr ? 'Votre réservation chez MIYAN — ' + r.date : 'Your MIYAN booking — ' + r.date;
+  const date = longDate_(r.date, fr);
+  const guests = fr ? (r.party > 1 ? `${r.party} personnes` : '1 personne') : (r.party > 1 ? `${r.party} guests` : '1 guest');
+  const subject = (fr ? 'Votre réservation chez MIYAN - ' : 'Your MIYAN booking - ') + r.date;
+
   const body = fr
-    ? `Bonjour ${r.name},\n\nVotre table est réservée :\n${r.date} à ${r.time} — ${r.party} personne(s)\nRéférence : ${r.id}\n\nPour annuler : ${cancelUrl}\n\nÀ bientôt,\nMIYAN — 62 rue du Faubourg Montmartre, 75009 Paris`
-    : `Hello ${r.name},\n\nYour table is booked:\n${r.date} at ${r.time} — ${r.party} guest(s)\nReference: ${r.id}\n\nTo cancel: ${cancelUrl}\n\nSee you soon,\nMIYAN — 62 rue du Faubourg Montmartre, 75009 Paris`;
-  MailApp.sendEmail({ to: r.email, replyTo: cfg.email || undefined, subject, body });
+    ? `Bonjour ${r.name},\n\nVotre table est réservée :\n${date} à ${r.time} - ${guests}\nRéférence : ${r.id}\n\nPour annuler : ${cancelUrl}\n\nÀ bientôt,\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`
+    : `Hello ${r.name},\n\nYour table is booked:\n${date} at ${r.time} - ${guests}\nReference: ${r.id}\n\nTo cancel: ${cancelUrl}\n\nSee you soon,\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`;
+
+  const htmlBody = emailShell_(
+    `<h1 style="color:${c.ink};font-size:22px;margin:0 0 14px;text-transform:uppercase;">${fr ? "C'est réservé" : "You're booked"}</h1>` +
+    `<p style="color:${c.ink};margin:0 0 16px;">${fr ? 'Bonjour' : 'Hello'} ${escapeHtml_(r.name)},</p>` +
+    `<div style="background:${c.paper};border-left:4px solid ${c.gold};border-radius:8px;padding:12px 14px;color:${c.ink};font-weight:600;margin:0 0 18px;">` +
+    `${date} ${fr ? 'à' : 'at'} ${r.time} - ${guests}<br>${fr ? 'Référence' : 'Reference'} : ${r.id}</div>` +
+    `<p style="margin:0 0 22px;"><a href="${cancelUrl}" style="color:${c.ink};">${fr ? 'Annuler la réservation' : 'Cancel reservation'}</a></p>` +
+    `<p style="color:${c.ink};margin:0;font-size:13px;">${fr ? 'À bientôt,' : 'See you soon,'}<br>MIYAN - 62 rue du Faubourg Montmartre, 75009 Paris</p>`
+  );
+
+  MailApp.sendEmail({ to: r.email, replyTo: cfg.email || undefined, subject, body, htmlBody });
 }
 
 // Email à l'équipe (Config.notifyEmails, ou Config.email si vide) à chaque nouvelle réservation,
-// pour confirmer côté restaurant sans avoir besoin d'admin.html ouvert.
+// pour confirmer côté restaurant sans avoir besoin d'admin.html ouvert. Toujours en français.
 function sendStaffNotification_(cfg, r) {
   if (!cfg.notifyEmails.length) return;
+  const c = EMAIL_COLORS_;
   const serviceLabel = (r.service && r.service.label) || (r.service && r.service.id) || '';
-  const subject = `Nouvelle réservation — ${r.date} ${r.time} (${r.party} pers.)`;
-  const body = `${r.name} — ${r.phone} — ${r.email}\n${r.date} à ${r.time} (${serviceLabel}) — ${r.party} personne(s)\nRéférence : ${r.id}` +
+  const date = longDate_(r.date, true);
+  const subject = `Nouvelle réservation - ${r.date} ${r.time} (${r.party} pers.)`;
+
+  const body = `${r.name} - ${r.phone} - ${r.email}\n${date} à ${r.time} (${serviceLabel}) - ${r.party} personne(s)\nRéférence : ${r.id}` +
     (r.note ? `\nNote : ${r.note}` : '') +
     `\n\nVoir le tableau de bord : ${ScriptApp.getService().getUrl()}`;
-  MailApp.sendEmail({ to: cfg.notifyEmails.join(','), subject, body });
+
+  const htmlBody = emailShell_(
+    `<h1 style="color:${c.ink};font-size:20px;margin:0 0 14px;text-transform:uppercase;">Nouvelle réservation</h1>` +
+    `<div style="background:${c.paper};border-left:4px solid ${c.gold};border-radius:8px;padding:12px 14px;color:${c.ink};font-weight:600;margin:0 0 16px;">` +
+    `${date} à ${r.time} (${escapeHtml_(serviceLabel)}) - ${r.party} personne(s)<br>Référence : ${r.id}</div>` +
+    `<p style="color:${c.ink};margin:0 0 6px;">${escapeHtml_(r.name)} - ${escapeHtml_(r.phone)} - ${escapeHtml_(r.email)}</p>` +
+    (r.note ? `<p style="color:${c.ink};margin:0 0 16px;font-style:italic;">${escapeHtml_(r.note)}</p>` : '') +
+    `<p style="margin:16px 0 0;"><a href="${ScriptApp.getService().getUrl()}" style="color:${c.ink};">Voir le tableau de bord</a></p>`
+  );
+
+  MailApp.sendEmail({ to: cfg.notifyEmails.join(','), subject, body, htmlBody });
 }
 
 /* ───────────────────────── Annulation ───────────────────────── */

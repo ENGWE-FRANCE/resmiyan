@@ -86,8 +86,10 @@
       <div id="slots" aria-live="polite"></div>
 
       <h2><i>4</i><span data-t="s4"></span></h2>
-      <label for="name" data-t="name"></label>
-      <input type="text" id="name" autocomplete="name" maxlength="80" required>
+      <div class="two">
+        <div><label for="firstName" data-t="firstName"></label><input type="text" id="firstName" autocomplete="given-name" maxlength="50" required></div>
+        <div><label for="lastName" data-t="lastName"></label><input type="text" id="lastName" autocomplete="family-name" maxlength="50" required></div>
+      </div>
       <div class="two">
         <div><label for="phone" data-t="phone"></label><input type="tel" id="phone" autocomplete="tel" maxlength="20" required></div>
         <div><label for="email" data-t="email"></label><input type="email" id="email" autocomplete="email" maxlength="120" required></div>
@@ -122,7 +124,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycby7DdY429jcdKEsTHkC9gHz
 const DEMO = !/^https:\/\/script\.google\.com\//.test(API_URL);
 const T = {
   fr: { title:'Réserver une table', sub:'Confirmation immédiate par email.', s1:'Combien de personnes ?', s2:'Quel jour ?', s3:'À quelle heure ?', s4:'Vos coordonnées',
-    other:'Autre date :', name:'Nom et prénom', phone:'Téléphone', email:'Email', note:'Une demande particulière ? (facultatif)', submit:'Confirmer la réservation',
+    other:'Autre date :', firstName:'Prénom', lastName:'Nom', phone:'Téléphone', email:'Email', note:'Une demande particulière ? (facultatif)', submit:'Confirmer la réservation',
     legal:'Vos coordonnées servent uniquement à gérer votre réservation. Pour toute demande : contact@miyan.fr.',
     midi:'Midi', soir:'Soir', pick:'Choisissez un jour pour voir les horaires.', loading:'Recherche des disponibilités…', closed:'Pas de réservation possible ce jour-là. Essayez une autre date.',
     none:'Complet ce jour-là. Essayez une autre date ou venez sans réservation.', group:n=>`Plus de ${n} personnes ? Écrivez-nous à `, pers:n=>n>1?`${n} personnes`:'1 personne', at:'à',
@@ -130,7 +132,7 @@ const T = {
     eFull:'Ce créneau vient d\'être pris. Choisissez-en un autre.', eNet:'Impossible d\'enregistrer la réservation. Réessayez dans un instant.', sending:'Envoi…',
     doneTitle:'C\'est réservé', doneMail:'Un email de confirmation vient de vous être envoyé. Il contient un lien pour annuler si besoin.', back:'Retour au site', ref:'Référence' },
   en: { title:'Book a table', sub:'Instant confirmation by email.', s1:'How many guests?', s2:'Which day?', s3:'What time?', s4:'Your details',
-    other:'Another date:', name:'Full name', phone:'Phone', email:'Email', note:'Any special request? (optional)', submit:'Confirm booking',
+    other:'Another date:', firstName:'First name', lastName:'Last name', phone:'Phone', email:'Email', note:'Any special request? (optional)', submit:'Confirm booking',
     legal:'Your details are only used to manage your booking. Any question: contact@miyan.fr.',
     midi:'Lunch', soir:'Dinner', pick:'Pick a day to see available times.', loading:'Checking availability…', closed:'No bookings available that day. Please try another date.',
     none:'Fully booked that day. Try another date or just walk in.', group:n=>`More than ${n} guests? Email us at `, pers:n=>n>1?`${n} guests`:'1 guest', at:'at',
@@ -148,7 +150,7 @@ const iso = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`
 const fromIso = s => { const p=s.split('-'); return new Date(+p[0], +p[1]-1, +p[2]); };
 const today = () => { const d=new Date(); d.setHours(0,0,0,0); return d; };
 const plus = n => { const d=today(); d.setDate(d.getDate()+n); return d; };
-const longDate = s => new Intl.DateTimeFormat(st.lang==='fr'?'fr-FR':'en-GB',{weekday:'long',day:'numeric',month:'long'}).format(fromIso(s));
+const longDate = (s, lang) => new Intl.DateTimeFormat((lang||st.lang)==='fr'?'fr-FR':'en-GB',{weekday:'long',day:'numeric',month:'long'}).format(fromIso(s));
 const el = (tag, attrs, text) => { const e=document.createElement(tag); Object.entries(attrs||{}).forEach(([k,v])=>e.setAttribute(k,v)); if(text!=null) e.textContent=text; return e; };
 
 function renderTexts() {
@@ -206,7 +208,7 @@ function renderSlots() {
   });
 }
 
-function recapText() { return `${longDate(st.date)} ${t('at')} ${st.time} · ${T[st.lang].pers(st.party)}`; }
+function recapText(lang) { lang = lang || st.lang; return `${longDate(st.date, lang)} ${T[lang].at} ${st.time} · ${T[lang].pers(st.party)}`; }
 function renderRecap() { const r=$('recap'); r.hidden = !(st.date&&st.time); if(!r.hidden) r.textContent = recapText(); }
 
 let reqId = 0;
@@ -247,19 +249,24 @@ function demoApi(method, data) {
 $('form').addEventListener('submit', async ev => {
   ev.preventDefault();
   const err = $('err'), btn = $('submit');
-  const name=$('name').value.trim(), phone=$('phone').value.trim(), email=$('email').value.trim();
+  const lang = st.lang; // figée ici : si la langue est changée pendant l'envoi, la confirmation reste cohérente
+  const firstName=$('firstName').value.trim(), lastName=$('lastName').value.trim();
+  const phone=$('phone').value.trim(), email=$('email').value.trim();
+  const name = `${firstName} ${lastName}`.trim();
   const fail = (k, id) => { err.textContent=t(k); if(id) $(id).focus(); };
   if (!st.date || !st.time) return fail('eSlot');
-  if (!name) return fail('eName','name');
+  if (!firstName) return fail('eName','firstName');
+  if (!lastName) return fail('eName','lastName');
   if (phone.replace(/\D/g,'').length < 8) return fail('ePhone','phone');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('eEmail','email');
   err.textContent=''; btn.disabled=true; btn.textContent=t('sending');
   let res;
-  try { res = await api('POST',{date:st.date,time:st.time,party:st.party,name,phone,email,note:$('note').value.trim(),lang:st.lang,website:$('website').value}); }
+  try { res = await api('POST',{date:st.date,time:st.time,party:st.party,name,phone,email,note:$('note').value.trim(),lang,website:$('website').value}); }
   catch(e) { res={ok:false}; }
   btn.disabled=false; btn.textContent=t('submit');
   if (res.ok) {
-    $('doneRecap').textContent = recapText() + (res.id && res.id!=='OK' ? ` · ${t('ref')} ${res.id}` : '');
+    document.querySelectorAll('#done [data-t]').forEach(e => e.textContent = T[lang][e.dataset.t]);
+    $('doneRecap').textContent = recapText(lang) + (res.id && res.id!=='OK' ? ` · ${T[lang].ref} ${res.id}` : '');
     $('form').hidden=true; $('done').hidden=false; window.scrollTo({top:0});
   } else if (res.error==='full') { err.textContent=t('eFull'); loadSlots(); }
   else err.textContent=t('eNet');
