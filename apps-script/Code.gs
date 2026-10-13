@@ -8,7 +8,9 @@
  *   GET  ?action=slots&date=YYYY-MM-DD&party=N -> { ok, slots:[{time,service,available}], config }
  *   GET  ?action=cancel&id=..&token=..    -> page HTML de confirmation d'annulation
  *   GET  ?action=list&key=..&date=..      -> tableau de bord admin (admin.html)
+ *   GET  ?action=config&key=..            -> config complète (admin.html, écran Paramètres)
  *   POST { date, time, party, firstName, lastName, phone, email, note, lang, website } -> { ok, id }
+ *   POST { action:'updateConfig', key, config:{...} } -> { ok } (admin.html, écran Paramètres)
  */
 
 const SHEET_RES = 'Reservations';
@@ -40,6 +42,7 @@ function doGet(e) {
     if (p.action === 'slots') return json(getSlots(p.date, Number(p.party || 1)));
     if (p.action === 'cancel') return cancelPage(p.id, p.token);
     if (p.action === 'list') return json(adminList(p));
+    if (p.action === 'config') return json(adminConfig(p));
     return json({ ok: true, config: publicConfig() });
   } catch (err) {
     return json({ ok: false, error: String(err && err.message || err) });
@@ -49,6 +52,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
+    if (data.action === 'updateConfig') return json(updateConfig_(data));
     return json(createReservation(data));
   } catch (err) {
     return json({ ok: false, error: String(err && err.message || err) });
@@ -316,10 +320,15 @@ function cancelPage(id, token) {
       break;
     }
   }
+  const c = EMAIL_COLORS_;
   return HtmlService.createHtmlOutput(
-    `<meta charset="utf-8"><div style="font-family:system-ui;max-width:420px;margin:60px auto;text-align:center;padding:0 20px;">` +
-    `<h1 style="font-size:20px;">MIYAN</h1><p>${message}</p>` +
-    `<p><a href="https://miyan.fr/">Retour au site</a></p></div>`
+    `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
+    `<div style="background:${c.bg};min-height:100vh;margin:0;padding:48px 16px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;">` +
+    `<div style="max-width:420px;margin:0 auto;background:${c.card};border-radius:16px;padding:28px 24px;border:1px solid ${c.gold};text-align:center;">` +
+    `<div style="color:${c.ink};font-weight:900;letter-spacing:.08em;font-size:18px;margin:0 0 18px;">米安 MIYAN</div>` +
+    `<p style="color:${c.ink};font-size:16px;margin:0 0 20px;">${message}</p>` +
+    `<a href="https://miyan.fr/" style="color:${c.ink};">Retour au site</a>` +
+    `</div></div>`
   );
 }
 
@@ -343,7 +352,54 @@ function adminList(p) {
     .filter(r => r.date >= fromDate)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
-  return { ok: true, reservations: list, config: { capacityPerSlot: cfg.capacityPerSlot, services: cfg.services } };
+  return { ok: true, reservations: list, config: { capacityPerSlot: cfg.capacityPerSlot, services: cfg.services, slotMinutes: cfg.slotMinutes } };
+}
+
+// Config complète éditable (sans adminKey) pour l'écran Paramètres de admin.html.
+function adminConfig(p) {
+  const cfg = getConfig();
+  if (!cfg.adminKey || p.key !== cfg.adminKey) return { ok: false, error: 'unauthorized' };
+  return {
+    ok: true,
+    config: {
+      maxParty: cfg.maxParty, maxDays: cfg.maxDays, phone: cfg.phone, email: cfg.email,
+      notifyEmails: cfg.notifyEmails.join(', '), slotMinutes: cfg.slotMinutes,
+      capacityPerSlot: cfg.capacityPerSlot, services: cfg.services,
+      closedWeekdays: cfg.closedWeekdays, closedDates: cfg.closedDates.join(', ')
+    }
+  };
+}
+
+// Écrit les champs fournis dans l'onglet Config (clé/valeur), sans toucher aux clés absentes.
+function updateConfig_(data) {
+  const cfg = getConfig();
+  if (!cfg.adminKey || data.key !== cfg.adminKey) return { ok: false, error: 'unauthorized' };
+
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_CONFIG);
+  const rows = sh.getDataRange().getValues();
+  const setKV = (key, value) => {
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === key) { sh.getRange(i + 1, 2).setValue(value); return; }
+    }
+    sh.appendRow([key, value]);
+  };
+
+  const c = data.config || {};
+  if (c.maxParty != null) setKV('maxParty', Number(c.maxParty));
+  if (c.maxDays != null) setKV('maxDays', Number(c.maxDays));
+  if (c.phone != null) setKV('phone', "'" + String(c.phone));
+  if (c.email != null) setKV('email', String(c.email));
+  if (c.notifyEmails != null) setKV('notifyEmails', String(c.notifyEmails));
+  if (c.slotMinutes != null) setKV('slotMinutes', Number(c.slotMinutes));
+  if (c.capacityPerSlot != null) setKV('capacityPerSlot', Number(c.capacityPerSlot));
+  if (c.services != null) setKV('servicesJson', JSON.stringify(c.services));
+  if (c.closedWeekdays != null) setKV('closedWeekdays', JSON.stringify(c.closedWeekdays));
+  if (c.closedDates != null) setKV('closedDates', String(c.closedDates));
+
+  // La feuille Config utilise aussi la colonne B en texte brut (cf. setupSpreadsheet) ;
+  // on la réapplique ici au cas où une ligne ait été ajoutée après coup par appendRow.
+  sh.getRange('B:B').setNumberFormat('@');
+  return { ok: true };
 }
 
 function isoToday_() {

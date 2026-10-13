@@ -16,7 +16,7 @@ admin.html        ──┘        Code.gs : doGet / doPost               "Reser
   - `Config` : paramètres clé/valeur (jauge max par créneau, horaires des services, jours fermés, clé admin...). Modifiable sans toucher au code.
 - **Apps Script** ([apps-script/Code.gs](apps-script/Code.gs)) = backend unique, exposé en Web App. Il sert les deux pages HTML et c'est lui qui décide si un créneau est encore disponible (avec un verrou pour éviter que deux réservations simultanées dépassent la jauge).
 - **reservation.html** = page client (déjà prototypée par Julien), inchangée : elle appelle l'API pour lister les créneaux puis poster la réservation.
-- **admin.html** = tableau de bord interne qui se rafraîchit automatiquement (toutes les 8 s) et met en évidence les nouvelles réservations — c'est la "page qui se met à jour" demandée dans l'échange.
+- **admin.html** = tableau de bord interne qui se rafraîchit automatiquement (toutes les 8 s) et met en évidence les nouvelles réservations — c'est la "page qui se met à jour" demandée dans l'échange. Un écran **Paramètres** (bouton dans la barre d'outils) permet de modifier services/horaires, jauge, jours fermés et contacts de notification directement depuis l'interface, sans ouvrir le Google Sheet.
 
 ## Mise en place (une fois)
 

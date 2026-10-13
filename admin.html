@@ -33,6 +33,28 @@
   .gate { max-width:360px; margin:80px auto; background:var(--cream); border-radius:16px; padding:22px; box-shadow:0 0 0 1px var(--gold) inset; }
   .gate h1 { font-size:18px; margin:0 0 12px; }
   .gate input { width:100%; margin-bottom:10px; }
+  .slots { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .slot-chip { background:var(--paper); border-radius:999px; padding:6px 12px; font-size:12.5px; font-weight:600; box-shadow:0 0 0 1px rgba(82,13,16,.18) inset; }
+  .slot-chip.full { background:var(--full); color:var(--cream); box-shadow:none; }
+  .slot-chip.near { box-shadow:0 0 0 1px var(--gold) inset; }
+  .panel { background:var(--cream); border-radius:14px; padding:18px 16px; box-shadow:0 0 0 1px var(--gold) inset; margin-bottom:14px; }
+  .panel h2 { font-size:15px; margin:0 0 14px; }
+  .panel h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; opacity:.7; margin:18px 0 8px; }
+  .field { margin-bottom:10px; }
+  .field label { display:block; font-size:12px; font-weight:700; margin-bottom:4px; }
+  .field input[type=text], .field input[type=number], .field input[type=email] {
+    width:100%; font:inherit; font-size:14px; padding:7px 9px; border-radius:8px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); }
+  .row-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+  @media (max-width:520px) { .row-grid { grid-template-columns:1fr; } }
+  .weekdays { display:flex; flex-wrap:wrap; gap:8px; }
+  .weekdays label { background:var(--paper); border-radius:8px; padding:6px 10px; font-size:12.5px; display:flex; align-items:center; gap:5px; cursor:pointer; }
+  .service-row { display:grid; grid-template-columns:1fr 1.3fr .8fr .8fr .8fr auto; gap:6px; align-items:end; margin-bottom:8px; }
+  .service-row .field { margin-bottom:0; }
+  @media (max-width:640px) { .service-row { grid-template-columns:1fr 1fr; } }
+  .del-btn { background:transparent; color:var(--full); border:1px solid var(--full); border-radius:8px; padding:7px 10px; font-size:12px; }
+  .ghost-btn { background:transparent; color:var(--bdx); border:1.5px solid var(--bdx); }
+  .panel-actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  .saved-msg { color:#2e7d32; font-size:13px; font-weight:600; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -55,10 +77,48 @@
       <input type="date" id="date">
       <button type="button" id="today">Aujourd'hui</button>
       <button type="button" id="refresh">Rafraîchir</button>
+      <button type="button" id="openSettings" class="ghost-btn">Paramètres</button>
       <button type="button" id="signout" style="background:transparent;color:var(--cream);opacity:.6;">Déconnexion</button>
     </div>
 
+    <div class="panel" id="settings" hidden>
+      <h2>Paramètres de réservation</h2>
+
+      <h3>Services &amp; créneaux</h3>
+      <div id="serviceRows"></div>
+      <button type="button" id="addService" class="ghost-btn">+ Ajouter un service</button>
+
+      <h3>Jauge &amp; créneaux</h3>
+      <div class="row-grid">
+        <div class="field"><label>Jauge par défaut (couverts par créneau)</label><input type="number" id="cfgCapacity" min="1"></div>
+        <div class="field"><label>Durée d'un créneau (minutes)</label><input type="number" id="cfgSlotMinutes" min="5" step="5"></div>
+        <div class="field"><label>Personnes max par réservation</label><input type="number" id="cfgMaxParty" min="1"></div>
+        <div class="field"><label>Réservable jusqu'à (jours à l'avance)</label><input type="number" id="cfgMaxDays" min="1"></div>
+      </div>
+
+      <h3>Jours fermés</h3>
+      <div class="weekdays" id="weekdays"></div>
+
+      <h3>Fermetures exceptionnelles</h3>
+      <div class="field"><label>Dates fermées (AAAA-MM-JJ, séparées par des virgules)</label><input type="text" id="cfgClosedDates" placeholder="2026-12-25, 2027-01-01"></div>
+
+      <h3>Contact &amp; notifications</h3>
+      <div class="row-grid">
+        <div class="field"><label>Téléphone affiché aux clients</label><input type="text" id="cfgPhone"></div>
+        <div class="field"><label>Email affiché aux clients</label><input type="email" id="cfgEmail"></div>
+      </div>
+      <div class="field"><label>Emails de notification équipe (séparés par des virgules)</label><input type="text" id="cfgNotifyEmails"></div>
+
+      <div class="panel-actions">
+        <button type="button" id="saveSettings">Enregistrer</button>
+        <button type="button" id="closeSettings" class="ghost-btn">Fermer</button>
+        <span class="saved-msg" id="savedMsg" hidden>Enregistré.</span>
+      </div>
+      <div class="err" id="settingsErr" hidden></div>
+    </div>
+
     <div class="summary" id="summary"></div>
+    <div class="slots" id="slotGrid"></div>
     <div class="err" id="err" hidden></div>
 
     <table>
@@ -101,13 +161,39 @@ async function fetchList() {
 function summarize(reservations, cfg) {
   const box = $('summary'); box.textContent = '';
   const active = reservations.filter(r => r.status !== 'cancelled');
-  const byService = {};
-  active.forEach(r => { byService[r.service] = (byService[r.service] || 0) + Number(r.party); });
   const totalCovers = active.reduce((s, r) => s + Number(r.party), 0);
   const pill = (label, value) => { const d = document.createElement('div'); d.className = 'pill'; d.innerHTML = `${label}<b>${value}</b>`; box.append(d); };
   pill('Réservations', active.length);
   pill('Couverts', totalCovers);
-  (cfg.services || []).forEach(s => pill(s.label || s.id, (byService[s.id] || 0) + ' / ' + (s.capacity ?? cfg.capacityPerSlot ?? '?') + ' par créneau'));
+}
+
+// La jauge s'applique à CHAQUE créneau de 15 min séparément (pas à tout le service additionné) :
+// on affiche donc l'occupation créneau par créneau, pas un total par service.
+function timesForService(svc, slotMinutes) {
+  const [sh, sm] = svc.start.split(':').map(Number);
+  const [eh, em] = svc.end.split(':').map(Number);
+  const start = sh * 60 + sm, end = eh * 60 + em;
+  const out = [];
+  for (let m = start; m < end; m += slotMinutes) out.push(pad(Math.floor(m / 60)) + ':' + pad(m % 60));
+  return out;
+}
+
+function renderSlotGrid(reservations, cfg) {
+  const box = $('slotGrid'); box.textContent = '';
+  const active = reservations.filter(r => r.status !== 'cancelled');
+  const booked = {};
+  active.forEach(r => { const k = r.time + '|' + r.service; booked[k] = (booked[k] || 0) + Number(r.party); });
+  (cfg.services || []).forEach(svc => {
+    const cap = svc.capacity ?? cfg.capacityPerSlot ?? 0;
+    timesForService(svc, cfg.slotMinutes || 15).forEach(time => {
+      const used = booked[time + '|' + svc.id] || 0;
+      if (!used) return;
+      const chip = document.createElement('span');
+      chip.className = 'slot-chip' + (used >= cap ? ' full' : used >= cap * 0.75 ? ' near' : '');
+      chip.textContent = `${svc.label || svc.id} ${time} : ${used}/${cap}`;
+      box.append(chip);
+    });
+  });
 }
 
 function render(reservations) {
@@ -140,6 +226,7 @@ async function poll() {
     $('err').hidden = true;
     render(res.reservations);
     summarize(res.reservations, res.config || {});
+    renderSlotGrid(res.reservations, res.config || {});
     setStatus('', 'À jour · ' + new Date().toLocaleTimeString('fr-FR'));
   } catch (e) {
     setStatus('err', 'Connexion impossible');
@@ -174,6 +261,98 @@ $('refresh').addEventListener('click', poll);
 $('today').addEventListener('click', () => { $('date').value = isoToday(); firstLoad = true; poll(); });
 $('date').addEventListener('change', () => { firstLoad = true; poll(); });
 $('signout').addEventListener('click', () => { localStorage.removeItem('miyan_admin_key'); adminKey = ''; showGate(); });
+
+/* ───────────────────────── Paramètres ───────────────────────── */
+
+const WEEKDAYS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+let settings = { services: [], closedWeekdays: [] };
+
+function renderServiceRows() {
+  const box = $('serviceRows'); box.textContent = '';
+  settings.services.forEach((svc, i) => {
+    const row = document.createElement('div'); row.className = 'service-row';
+    row.innerHTML = `
+      <div class="field"><label>Identifiant</label><input type="text" data-f="id" value="${escapeHtml(svc.id||'')}"></div>
+      <div class="field"><label>Nom affiché</label><input type="text" data-f="label" value="${escapeHtml(svc.label||'')}"></div>
+      <div class="field"><label>Début</label><input type="text" data-f="start" value="${escapeHtml(svc.start||'')}" placeholder="12:00"></div>
+      <div class="field"><label>Fin</label><input type="text" data-f="end" value="${escapeHtml(svc.end||'')}" placeholder="14:00"></div>
+      <div class="field"><label>Jauge (vide = défaut)</label><input type="number" data-f="capacity" min="1" value="${svc.capacity ?? ''}"></div>
+      <button type="button" class="del-btn">Suppr.</button>`;
+    row.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+      const f = inp.dataset.f;
+      settings.services[i][f] = f === 'capacity' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+    }));
+    row.querySelector('.del-btn').addEventListener('click', () => { settings.services.splice(i, 1); renderServiceRows(); });
+    box.append(row);
+  });
+}
+
+function renderWeekdays() {
+  const box = $('weekdays'); box.textContent = '';
+  WEEKDAYS.forEach((label, i) => {
+    const wrap = document.createElement('label');
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = settings.closedWeekdays.includes(i);
+    cb.addEventListener('change', () => {
+      settings.closedWeekdays = cb.checked
+        ? [...new Set([...settings.closedWeekdays, i])]
+        : settings.closedWeekdays.filter(d => d !== i);
+    });
+    wrap.append(cb, document.createTextNode(' ' + label));
+    box.append(wrap);
+  });
+}
+
+$('addService').addEventListener('click', () => {
+  settings.services.push({ id: '', label: '', start: '', end: '', capacity: null });
+  renderServiceRows();
+});
+
+async function loadSettings() {
+  $('settingsErr').hidden = true; $('savedMsg').hidden = true;
+  const url = API_URL + '?' + new URLSearchParams({ action: 'config', key: adminKey });
+  const res = await fetch(url).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+  if (!res.ok) { $('settingsErr').hidden = false; $('settingsErr').textContent = 'Erreur : ' + res.error; return; }
+  const c = res.config;
+  settings.services = (c.services || []).map(s => ({ ...s }));
+  settings.closedWeekdays = (c.closedWeekdays || []).slice();
+  $('cfgCapacity').value = c.capacityPerSlot ?? '';
+  $('cfgSlotMinutes').value = c.slotMinutes ?? '';
+  $('cfgMaxParty').value = c.maxParty ?? '';
+  $('cfgMaxDays').value = c.maxDays ?? '';
+  $('cfgClosedDates').value = c.closedDates || '';
+  $('cfgPhone').value = c.phone || '';
+  $('cfgEmail').value = c.email || '';
+  $('cfgNotifyEmails').value = c.notifyEmails || '';
+  renderServiceRows();
+  renderWeekdays();
+}
+
+async function saveSettings() {
+  $('settingsErr').hidden = true; $('savedMsg').hidden = true;
+  const config = {
+    capacityPerSlot: Number($('cfgCapacity').value || 0),
+    slotMinutes: Number($('cfgSlotMinutes').value || 15),
+    maxParty: Number($('cfgMaxParty').value || 1),
+    maxDays: Number($('cfgMaxDays').value || 1),
+    closedDates: $('cfgClosedDates').value.trim(),
+    phone: $('cfgPhone').value.trim(),
+    email: $('cfgEmail').value.trim(),
+    notifyEmails: $('cfgNotifyEmails').value.trim(),
+    services: settings.services.filter(s => s.id && s.start && s.end),
+    closedWeekdays: settings.closedWeekdays
+  };
+  const res = await fetch(API_URL, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'updateConfig', key: adminKey, config })
+  }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+  if (!res.ok) { $('settingsErr').hidden = false; $('settingsErr').textContent = 'Erreur : ' + res.error; return; }
+  $('savedMsg').hidden = false;
+  poll();
+}
+
+$('openSettings').addEventListener('click', () => { $('settings').hidden = false; loadSettings(); });
+$('closeSettings').addEventListener('click', () => { $('settings').hidden = true; });
+$('saveSettings').addEventListener('click', saveSettings);
 
 $('date').value = isoToday();
 if (adminKey) { showApp(); startPolling(); } else { showGate(); }
