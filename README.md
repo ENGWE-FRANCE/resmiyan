@@ -87,3 +87,13 @@ Dans les deux cas, le Google Sheet + Apps Script restent la seule "base de donn�
 - Champ piège (`website`) déjà présent côté formulaire client : une soumission qui le remplit est silencieusement ignorée (bot).
 - `admin.html` exige la clé stockée dans `Config.adminKey` — à ne partager qu'avec l'équipe.
 - Double réservation sur un créneau plein : vérifiée deux fois (affichage + au moment d'écrire, sous verrou) pour éviter une course entre deux clients simultanés.
+
+## Occupation réelle des tables
+
+La jauge ne compte pas les réservations créneau par créneau de façon indépendante : une réservation à 19h00 occupe une table jusqu'à `Config.turnMinutes` minutes plus tard (90 min par défaut), donc elle est comptée dans le calcul d'occupation de 19h15, 19h30, etc. tant que la table n'est pas censée être libérée. Réglable dans le panneau Paramètres ("Durée d'occupation d'une table").
+
+L'équipe peut aussi forcer manuellement un créneau précis (feuille `Overrides`, éditable depuis la grille d'occupation de `admin.html` en cliquant sur un créneau) : une jauge à `0` le marque complet quel que soit le calcul automatique, une jauge plus haute libère des places (ex. une table qui s'est libérée plus tôt que prévu). Ce forçage persiste jusqu'à ce qu'il soit effacé depuis le même écran.
+
+## Pistes d'évolution (pas encore implémenté)
+
+- **Statuts de réservation plus fins** : au-delà de `confirmed`/`cancelled`, distinguer *honorée* (le client est bien venu), *no-show* (n'est pas venu), etc. Dans `admin.html`, coder chaque statut par une couleur de ligne dans le tableau pour visualiser en un coup d'œil ce qui a été traité pour le service en cours.
