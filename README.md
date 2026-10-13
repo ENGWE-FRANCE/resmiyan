@@ -45,6 +45,16 @@ La jauge limite le nombre total de couverts acceptés sur un même créneau de 1
   ]
   ```
 
+## Horaires différents selon le jour
+
+`servicesJson` définit les horaires **par défaut**, appliqués à tous les jours ouverts. Si un jour de la semaine a des horaires différents (ex. le restaurant ferme plus tôt le midi un certain jour), on le définit dans `Config.hoursOverrides` sans toucher à `servicesJson` :
+
+```json
+{ "2": { "midi": { "start": "11:30", "end": "14:30" }, "soir": { "start": "18:30", "end": "23:00" } } }
+```
+
+Les clés sont les jours de la semaine (`0` = dimanche ... `6` = samedi, comme `closedWeekdays`), et chaque service absent d'un jour garde son horaire par défaut. Éditable directement depuis le panneau **Paramètres** de `admin.html` (tableau "Horaires différents selon le jour") — pas besoin de modifier le JSON à la main.
+
   Ici midi est limité à 16 couverts par créneau de 15 min, soir à 28, sans toucher au code. Dès que le contact donne le nombre réel de places, c'est cette valeur (`capacity` par service, ou `capacityPerSlot` si une seule jauge suffit) qu'il faut mettre à jour — directement dans la feuille `Config`, aucun redéploiement n'est nécessaire.
   Le calcul : pour un créneau donné, Apps Script additionne les couverts déjà confirmés à cette heure+service, et refuse toute nouvelle réservation qui ferait dépasser cette jauge (vérifié une première fois à l'affichage des créneaux, une seconde fois — sous verrou — au moment d'enregistrer, pour éviter que deux clients ne réservent le dernier covert au même instant).
 

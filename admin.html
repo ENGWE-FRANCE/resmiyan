@@ -52,6 +52,12 @@
   .service-row .field { margin-bottom:0; }
   @media (max-width:640px) { .service-row { grid-template-columns:1fr 1fr; } }
   .del-btn { background:transparent; color:var(--full); border:1px solid var(--full); border-radius:8px; padding:7px 10px; font-size:12px; }
+  #hoursTable { overflow-x:auto; }
+  #hoursTable table { width:100%; border-collapse:collapse; margin-top:4px; }
+  #hoursTable th, #hoursTable td { padding:4px 6px; font-size:12px; white-space:nowrap; }
+  #hoursTable th { text-align:left; opacity:.7; font-weight:700; }
+  #hoursTable input[type=text] { width:66px; font:inherit; font-size:12px; padding:5px 6px; border-radius:6px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); }
+  .hint { font-size:12px; opacity:.7; margin:4px 0 0; }
   .ghost-btn { background:transparent; color:var(--bdx); border:1.5px solid var(--bdx); }
   .panel-actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
   .saved-msg { color:#2e7d32; font-size:13px; font-weight:600; }
@@ -98,6 +104,10 @@
 
       <h3>Jours fermés</h3>
       <div class="weekdays" id="weekdays"></div>
+
+      <h3>Horaires différents selon le jour</h3>
+      <p class="hint">Laissez vide pour garder l'horaire par défaut (ci-dessus) ce jour-là. Ex. : mardi ferme plus tôt le midi.</p>
+      <div id="hoursTable"></div>
 
       <h3>Fermetures exceptionnelles</h3>
       <div class="field"><label>Dates fermées (AAAA-MM-JJ, séparées par des virgules)</label><input type="text" id="cfgClosedDates" placeholder="2026-12-25, 2027-01-01"></div>
@@ -265,7 +275,7 @@ $('signout').addEventListener('click', () => { localStorage.removeItem('miyan_ad
 /* ───────────────────────── Paramètres ───────────────────────── */
 
 const WEEKDAYS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
-let settings = { services: [], closedWeekdays: [] };
+let settings = { services: [], closedWeekdays: [], hoursOverrides: {} };
 
 function renderServiceRows() {
   const box = $('serviceRows'); box.textContent = '';
@@ -282,9 +292,57 @@ function renderServiceRows() {
       const f = inp.dataset.f;
       settings.services[i][f] = f === 'capacity' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
     }));
-    row.querySelector('.del-btn').addEventListener('click', () => { settings.services.splice(i, 1); renderServiceRows(); });
+    row.querySelector('.del-btn').addEventListener('click', () => { settings.services.splice(i, 1); renderServiceRows(); renderHoursTable(); });
     box.append(row);
   });
+  renderHoursTable();
+}
+
+function renderHoursTable() {
+  const box = $('hoursTable'); box.textContent = '';
+  if (!settings.services.length) { box.innerHTML = '<p class="hint">Ajoutez au moins un service ci-dessus.</p>'; return; }
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  let headRow = '<tr><th>Jour</th>';
+  settings.services.forEach(s => { headRow += `<th colspan="2">${escapeHtml(s.label || s.id)}</th>`; });
+  headRow += '</tr><tr><th></th>';
+  settings.services.forEach(() => { headRow += '<th>Début</th><th>Fin</th>'; });
+  headRow += '</tr>';
+  thead.innerHTML = headRow;
+  table.append(thead);
+  const tbody = document.createElement('tbody');
+  WEEKDAYS.forEach((label, day) => {
+    const tr = document.createElement('tr');
+    let rowHtml = `<td>${label}</td>`;
+    settings.services.forEach(s => {
+      const ov = (settings.hoursOverrides[day] && settings.hoursOverrides[day][s.id]) || {};
+      rowHtml += `<td><input type="text" class="hrs-in" data-day="${day}" data-svc="${escapeHtml(s.id)}" data-f="start" value="${escapeHtml(ov.start || '')}" placeholder="${escapeHtml(s.start || '')}"></td>`;
+      rowHtml += `<td><input type="text" class="hrs-in" data-day="${day}" data-svc="${escapeHtml(s.id)}" data-f="end" value="${escapeHtml(ov.end || '')}" placeholder="${escapeHtml(s.end || '')}"></td>`;
+    });
+    tr.innerHTML = rowHtml;
+    tbody.append(tr);
+  });
+  table.append(tbody);
+  box.append(table);
+  box.querySelectorAll('.hrs-in').forEach(inp => inp.addEventListener('input', () => {
+    const day = inp.dataset.day, svc = inp.dataset.svc, f = inp.dataset.f;
+    settings.hoursOverrides[day] = settings.hoursOverrides[day] || {};
+    settings.hoursOverrides[day][svc] = settings.hoursOverrides[day][svc] || {};
+    settings.hoursOverrides[day][svc][f] = inp.value.trim();
+  }));
+}
+
+function cleanHoursOverrides(ov) {
+  const out = {};
+  Object.keys(ov || {}).forEach(day => {
+    const svcs = {};
+    Object.keys(ov[day] || {}).forEach(svc => {
+      const o = ov[day][svc];
+      if (o && (o.start || o.end)) svcs[svc] = { start: o.start || '', end: o.end || '' };
+    });
+    if (Object.keys(svcs).length) out[day] = svcs;
+  });
+  return out;
 }
 
 function renderWeekdays() {
@@ -315,6 +373,7 @@ async function loadSettings() {
   const c = res.config;
   settings.services = (c.services || []).map(s => ({ ...s }));
   settings.closedWeekdays = (c.closedWeekdays || []).slice();
+  settings.hoursOverrides = JSON.parse(JSON.stringify(c.hoursOverrides || {}));
   $('cfgCapacity').value = c.capacityPerSlot ?? '';
   $('cfgSlotMinutes').value = c.slotMinutes ?? '';
   $('cfgMaxParty').value = c.maxParty ?? '';
@@ -339,7 +398,8 @@ async function saveSettings() {
     email: $('cfgEmail').value.trim(),
     notifyEmails: $('cfgNotifyEmails').value.trim(),
     services: settings.services.filter(s => s.id && s.start && s.end),
-    closedWeekdays: settings.closedWeekdays
+    closedWeekdays: settings.closedWeekdays,
+    hoursOverrides: cleanHoursOverrides(settings.hoursOverrides)
   };
   const res = await fetch(API_URL, {
     method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },

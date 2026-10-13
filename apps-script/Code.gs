@@ -83,9 +83,12 @@ function getConfig() {
     timezone: String(c.timezone || TZ),
     slotMinutes: Number(c.slotMinutes || 15),
     capacityPerSlot: Number(c.capacityPerSlot || 20),
-    services: JSON.parse(c.servicesJson || '[{"id":"midi","label":"Midi","start":"12:00","end":"14:00"},{"id":"soir","label":"Soir","start":"19:00","end":"22:00"}]'),
-    closedWeekdays: JSON.parse(c.closedWeekdays || '[1]'),
+    services: JSON.parse(c.servicesJson || '[{"id":"midi","label":"Midi","start":"11:30","end":"15:00"},{"id":"soir","label":"Soir","start":"18:00","end":"23:00"}]'),
+    closedWeekdays: JSON.parse(c.closedWeekdays || '[0]'),
     closedDates: String(c.closedDates || '').split(',').map(s => s.trim()).filter(Boolean),
+    // Horaires différents de "services" pour certains jours (ex. mardi ferme plus tôt le midi) :
+    // { "<0-6>": { "<idService>": {start,end} } }. Un jour/service absent garde l'horaire par défaut.
+    hoursOverrides: JSON.parse(c.hoursOverrides || '{}'),
     adminKey: String(c.adminKey || ''),
     notifyEmails: String(c.notifyEmails || c.email || '').split(',').map(s => s.trim()).filter(Boolean)
   };
@@ -114,6 +117,17 @@ function nowInTz_(cfg) {
     date: Utilities.formatDate(now, cfg.timezone, 'yyyy-MM-dd'),
     time: Utilities.formatDate(now, cfg.timezone, 'HH:mm')
   };
+}
+
+// Services applicables à une date donnée : les services de base (cfg.services), avec les
+// horaires de ce jour de la semaine remplacés si un hoursOverrides existe pour ce jour+service.
+function servicesForDate_(dateStr, cfg) {
+  const weekday = new Date(dateStr + 'T00:00:00').getDay();
+  const overrides = cfg.hoursOverrides[String(weekday)] || {};
+  return cfg.services.map(s => {
+    const o = overrides[s.id];
+    return (o && (o.start || o.end)) ? Object.assign({}, s, { start: o.start || s.start, end: o.end || s.end }) : s;
+  });
 }
 
 function isClosed_(dateStr, cfg) {
@@ -165,7 +179,7 @@ function getSlots(dateStr, party) {
   const now = nowInTz_(cfg);
   const isToday = dateStr === now.date;
   const slots = [];
-  cfg.services.forEach(svc => {
+  servicesForDate_(dateStr, cfg).forEach(svc => {
     timesForService_(svc, cfg.slotMinutes).forEach(time => {
       const used = booked[time + '|' + svc.id] || 0;
       slots.push({
@@ -200,7 +214,7 @@ function createReservation(data) {
   if (phone.replace(/\D/g, '').length < 8) return { ok: false, error: 'invalid' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'invalid' };
 
-  const service = cfg.services.find(s => timesForService_(s, cfg.slotMinutes).indexOf(time) !== -1);
+  const service = servicesForDate_(date, cfg).find(s => timesForService_(s, cfg.slotMinutes).indexOf(time) !== -1);
   if (!service) return { ok: false, error: 'invalid' };
 
   const lock = LockService.getScriptLock();
@@ -352,7 +366,7 @@ function adminList(p) {
     .filter(r => r.date >= fromDate)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
-  return { ok: true, reservations: list, config: { capacityPerSlot: cfg.capacityPerSlot, services: cfg.services, slotMinutes: cfg.slotMinutes } };
+  return { ok: true, reservations: list, config: { capacityPerSlot: cfg.capacityPerSlot, services: servicesForDate_(fromDate, cfg), slotMinutes: cfg.slotMinutes } };
 }
 
 // Config complète éditable (sans adminKey) pour l'écran Paramètres de admin.html.
@@ -365,7 +379,8 @@ function adminConfig(p) {
       maxParty: cfg.maxParty, maxDays: cfg.maxDays, phone: cfg.phone, email: cfg.email,
       notifyEmails: cfg.notifyEmails.join(', '), slotMinutes: cfg.slotMinutes,
       capacityPerSlot: cfg.capacityPerSlot, services: cfg.services,
-      closedWeekdays: cfg.closedWeekdays, closedDates: cfg.closedDates.join(', ')
+      closedWeekdays: cfg.closedWeekdays, closedDates: cfg.closedDates.join(', '),
+      hoursOverrides: cfg.hoursOverrides
     }
   };
 }
@@ -395,6 +410,7 @@ function updateConfig_(data) {
   if (c.services != null) setKV('servicesJson', JSON.stringify(c.services));
   if (c.closedWeekdays != null) setKV('closedWeekdays', JSON.stringify(c.closedWeekdays));
   if (c.closedDates != null) setKV('closedDates', String(c.closedDates));
+  if (c.hoursOverrides != null) setKV('hoursOverrides', JSON.stringify(c.hoursOverrides));
 
   // La feuille Config utilise aussi la colonne B en texte brut (cf. setupSpreadsheet) ;
   // on la réapplique ici au cas où une ligne ait été ajoutée après coup par appendRow.
@@ -433,15 +449,16 @@ function setupSpreadsheet() {
     [
       ['maxParty', 8],
       ['maxDays', 30],
-      ['phone', '+33 1 00 00 00 00'],
+      ['phone', "'07 70 93 79 36"],
       ['email', 'contact@miyan.fr'],
       ['notifyEmails', ''],
       ['timezone', 'Europe/Paris'],
       ['slotMinutes', 15],
       ['capacityPerSlot', 20],
-      ['servicesJson', '[{"id":"midi","label":"Midi","start":"12:00","end":"14:00"},{"id":"soir","label":"Soir","start":"19:00","end":"22:00"}]'],
-      ['closedWeekdays', '[1]'],
+      ['servicesJson', '[{"id":"midi","label":"Midi","start":"11:30","end":"15:00"},{"id":"soir","label":"Soir","start":"18:00","end":"23:00"}]'],
+      ['closedWeekdays', '[0]'],
       ['closedDates', ''],
+      ['hoursOverrides', '{"2":{"midi":{"start":"11:30","end":"14:30"},"soir":{"start":"18:30","end":"23:00"}},"5":{"midi":{"start":"11:30","end":"14:30"}}}'],
       ['adminKey', Utilities.getUuid()]
     ].forEach(row => cfg.appendRow(row));
   }
