@@ -10,8 +10,8 @@
 <style>
   :root { --bdx:#520D10; --deep:#2a0708; --cream:#F4E5C4; --gold:#C49A3A; --paper:#FBF3DF; --ok:#2e7d32; --full:#a3000b; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--deep); color:var(--bdx); font-family:"Work Sans",system-ui,sans-serif; }
-  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 60px; }
+  body { margin:0; min-height:100vh; background:var(--deep); color:var(--bdx); font-family:"Work Sans",system-ui,sans-serif; }
+  .wrap { max-width:1000px; margin:0 auto; padding:20px 16px 60px; min-height:100vh; display:flex; flex-direction:column; }
   header { display:flex; align-items:center; justify-content:space-between; color:var(--cream); padding:6px 2px 18px; flex-wrap:wrap; gap:10px; }
   .logo { display:inline-flex; align-items:center; gap:9px; font-weight:900; letter-spacing:.12em; font-size:20px; }
   .logo img { width:24px; height:24px; border-radius:6px; }
@@ -19,11 +19,11 @@
   .dot { width:9px; height:9px; border-radius:50%; background:var(--ok); }
   .dot.stale { background:var(--gold); }
   .dot.err { background:var(--full); }
-  .toolbar { background:var(--cream); border-radius:14px; padding:12px 14px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; box-shadow:0 0 0 1px var(--gold) inset; margin-bottom:14px; }
+  .toolbar { background:var(--cream); border-radius:14px; padding:12px 14px; display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; box-shadow:0 0 0 1px var(--gold) inset; margin-bottom:14px; }
   .toolbar label { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
   input[type=date], input[type=password] { font:inherit; font-size:14px; padding:7px 9px; border-radius:8px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); }
   button { font:inherit; font-weight:700; border:0; border-radius:999px; padding:8px 16px; cursor:pointer; background:var(--bdx); color:var(--cream); }
-  .summary { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .summary { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-bottom:14px; }
   .pill { background:var(--paper); border-radius:12px; padding:10px 14px; font-size:13px; box-shadow:0 0 0 1px var(--gold) inset; }
   .pill b { display:block; font-size:18px; }
   table { width:100%; border-collapse:collapse; background:var(--cream); border-radius:14px; overflow:hidden; box-shadow:0 0 0 1px var(--gold) inset; }
@@ -34,10 +34,15 @@
   @keyframes flash { from { background:var(--gold); } to { background:transparent; } }
   .empty { padding:30px; text-align:center; color:var(--cream); opacity:.75; }
   .err { color:var(--cream); background:var(--full); padding:10px 14px; border-radius:10px; margin-bottom:14px; }
-  .gate { max-width:360px; margin:80px auto; background:var(--cream); border-radius:16px; padding:22px; box-shadow:0 0 0 1px var(--gold) inset; }
-  .gate h1 { font-size:18px; margin:0 0 12px; }
-  .gate input { width:100%; margin-bottom:10px; }
-  .slots { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  /* #gate centre sa carte à la fois horizontalement et verticalement dans l'espace restant
+     sous l'en-tête (.wrap est en colonne flex, #gate prend tout l'espace disponible). */
+  .gate { flex:1; display:flex; align-items:center; justify-content:center; padding:20px 0; }
+  .gate-card { width:100%; max-width:360px; background:var(--cream); border-radius:16px; padding:22px; box-shadow:0 0 0 1px var(--gold) inset; }
+  .gate-card h1 { font-size:18px; margin:0 0 12px; text-align:center; }
+  .gate-card input { width:100%; margin-bottom:10px; }
+  .gate-card button { width:100%; }
+  .gate-card .err { margin:10px 0 0; }
+  .slots { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-bottom:14px; }
   .slot-chip { background:var(--paper); color:var(--bdx); border:0; cursor:pointer; border-radius:999px; padding:6px 12px; font-size:12.5px; font-weight:600; box-shadow:0 0 0 1px rgba(82,13,16,.18) inset; }
   .slot-chip:hover { box-shadow:0 0 0 1.5px var(--bdx) inset; }
   .slot-chip.full { background:var(--full); color:var(--cream); box-shadow:none; }
@@ -53,7 +58,7 @@
     width:100%; font:inherit; font-size:14px; padding:7px 9px; border-radius:8px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); }
   .row-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
   @media (max-width:520px) { .row-grid { grid-template-columns:1fr; } }
-  .weekdays { display:flex; flex-wrap:wrap; gap:8px; }
+  .weekdays { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; }
   .weekdays label { background:var(--paper); border-radius:8px; padding:6px 10px; font-size:12.5px; display:flex; align-items:center; gap:5px; cursor:pointer; }
   .service-row { display:grid; grid-template-columns:1fr 1.3fr .8fr .8fr .8fr auto; gap:6px; align-items:end; margin-bottom:8px; }
   .service-row .field { margin-bottom:0; }
@@ -66,9 +71,22 @@
   #hoursTable input[type=text] { width:66px; font:inherit; font-size:12px; padding:5px 6px; border-radius:6px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); }
   .hint { font-size:12px; opacity:.7; margin:4px 0 0; }
   .ghost-btn { background:transparent; color:var(--bdx); border:1.5px solid var(--bdx); }
-  .panel-actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  .panel-actions { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; justify-content:center; }
   .saved-msg { color:#2e7d32; font-size:13px; font-weight:600; }
+  .table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border-radius:14px; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(42,7,8,.72); display:flex; align-items:center; justify-content:center; padding:16px; z-index:1000; }
+  .modal { background:var(--cream); border-radius:16px; padding:22px 20px; max-width:420px; width:100%; max-height:90vh; overflow-y:auto; box-shadow:0 0 0 1px var(--gold) inset, 0 20px 50px rgba(0,0,0,.35); }
+  .modal h3 { margin:0 0 4px; font-size:17px; text-transform:uppercase; letter-spacing:.04em; }
+  .modal .field textarea { width:100%; font:inherit; font-size:14px; padding:8px 10px; border-radius:10px; border:1.5px solid rgba(82,13,16,.25); background:var(--paper); color:var(--bdx); resize:vertical; min-height:72px; }
+  .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; flex-wrap:wrap; }
   [hidden] { display:none !important; }
+  @media (max-width:480px) {
+    .wrap { padding:14px 12px 48px; }
+    .gate { padding:12px 0; }
+    .modal { padding:18px 16px; border-radius:14px; }
+    table { font-size:12.5px; }
+    th, td { padding:7px 8px; }
+  }
 </style>
 </head>
 <body>
@@ -79,9 +97,12 @@
   </header>
 
   <div class="gate" id="gate">
-    <h1>Accès admin</h1>
-    <input type="password" id="gateKey" placeholder="Clé admin" autocomplete="off">
-    <button type="button" id="gateGo">Entrer</button>
+    <div class="gate-card">
+      <h1>Accès admin</h1>
+      <input type="password" id="gateKey" placeholder="Clé admin" autocomplete="off">
+      <button type="button" id="gateGo">Entrer</button>
+      <div class="err" id="gateErr" hidden></div>
+    </div>
   </div>
 
   <div id="app" hidden>
@@ -140,13 +161,26 @@
     <div class="slots" id="slotGrid"></div>
     <div class="err" id="err" hidden></div>
 
-    <table>
-      <thead>
-        <tr><th>Heure</th><th>Service</th><th>Couverts</th><th>Prénom</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Note</th><th>Statut</th></tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Heure</th><th>Service</th><th>Couverts</th><th>Prénom</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Note</th><th>Statut</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
     <div class="empty" id="empty" hidden>Aucune réservation pour cette date.</div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button type="button" id="modalCancel" class="ghost-btn">Annuler</button>
+      <button type="button" id="modalConfirm">Confirmer</button>
+    </div>
   </div>
 </div>
 
@@ -236,17 +270,21 @@ function renderSlotGrid(reservations, cfg, overrides) {
 async function openOverrideEditor(time, svc, occupied, baseCap, forced) {
   const label = `${svc.label || svc.id} ${time}`;
   const current = forced != null ? forced : '';
-  const input = window.prompt(
-    `${label}\nOccupation actuelle : ${occupied} couvert(s)\nJauge normale : ${baseCap}\n\n` +
-    `Entrez une jauge à forcer pour ce créneau précis (0 = marquer complet), ou laissez vide pour effacer un forçage existant et revenir à l'automatique :`,
-    current
-  );
+  const input = await openModal({
+    title: label,
+    bodyHtml:
+      `<p class="hint">Occupation actuelle : <b>${occupied}</b> couvert(s) &middot; Jauge normale : <b>${baseCap}</b></p>` +
+      `<div class="field"><label>Jauge à forcer pour ce créneau (0 = complet, vide = automatique)</label>` +
+      `<input type="number" min="0" data-modal-value value="${escapeHtml(String(current))}"></div>`,
+    confirmLabel: 'Appliquer',
+    focusSelector: 'input'
+  });
   if (input === null) return; // annulé
   const res = await fetch(API_URL, {
     method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action: 'setOverride', key: adminKey, date: currentDate, time, service: svc.id, capacity: input.trim() })
   }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
-  if (!res.ok) { alert('Erreur : ' + res.error); return; }
+  if (!res.ok) { await showAlert('Erreur : ' + res.error); return; }
   poll();
 }
 
@@ -272,17 +310,72 @@ function render(reservations) {
 }
 
 async function adminCancel(id) {
-  const reason = window.prompt('Motif de l\'annulation (facultatif, envoyé au client par email) :', '');
+  const reason = await openModal({
+    title: 'Annuler la réservation',
+    bodyHtml:
+      `<p class="hint">Motif envoyé au client par email (facultatif).</p>` +
+      `<div class="field"><label>Motif</label>` +
+      `<textarea data-modal-value rows="3" placeholder="Ex. incident en cuisine, table indisponible…"></textarea></div>`,
+    confirmLabel: "Confirmer l'annulation",
+    focusSelector: 'textarea'
+  });
   if (reason === null) return; // annulé
   const res = await fetch(API_URL, {
     method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action: 'adminCancel', key: adminKey, id, reason: reason.trim() })
   }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
-  if (!res.ok) { alert('Erreur : ' + res.error); return; }
+  if (!res.ok) { await showAlert('Erreur : ' + res.error); return; }
   poll();
 }
 
 function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+/* ───────────────────────── Modales (remplace prompt()/alert() natifs) ───────────────────────── */
+
+// Modale générique : affiche titre + corps HTML fourni, résout avec la valeur du champ portant
+// [data-modal-value] si on confirme (ou `true` si aucun champ), `null` si on annule/ferme.
+function openModal({ title, bodyHtml, confirmLabel = 'Confirmer', cancelLabel = 'Annuler', showCancel = true, focusSelector }) {
+  return new Promise(resolve => {
+    const overlay = $('modalOverlay');
+    $('modalTitle').textContent = title;
+    $('modalBody').innerHTML = bodyHtml;
+    $('modalConfirm').textContent = confirmLabel;
+    $('modalCancel').hidden = !showCancel;
+    $('modalCancel').textContent = cancelLabel;
+    overlay.hidden = false;
+
+    const collectValue = () => {
+      const field = $('modalBody').querySelector('[data-modal-value]');
+      return field ? field.value : true;
+    };
+    const close = value => { overlay.hidden = true; cleanup(); resolve(value); };
+    const onConfirm = () => close(collectValue());
+    const onCancel = () => close(null);
+    const onOverlayClick = e => { if (e.target === overlay) close(null); };
+    const onKeydown = e => {
+      if (e.key === 'Escape') close(null);
+      else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') onConfirm();
+    };
+    function cleanup() {
+      $('modalConfirm').removeEventListener('click', onConfirm);
+      $('modalCancel').removeEventListener('click', onCancel);
+      overlay.removeEventListener('click', onOverlayClick);
+      document.removeEventListener('keydown', onKeydown);
+    }
+    $('modalConfirm').addEventListener('click', onConfirm);
+    $('modalCancel').addEventListener('click', onCancel);
+    overlay.addEventListener('click', onOverlayClick);
+    document.addEventListener('keydown', onKeydown);
+    requestAnimationFrame(() => {
+      const el = focusSelector ? $('modalBody').querySelector(focusSelector) : $('modalConfirm');
+      el && el.focus();
+    });
+  });
+}
+
+function showAlert(message) {
+  return openModal({ title: 'Erreur', bodyHtml: `<p>${escapeHtml(message)}</p>`, confirmLabel: 'OK', showCancel: false });
+}
 
 async function poll() {
   try {
@@ -311,12 +404,14 @@ function startPolling() {
 
 function showGate(message) {
   $('app').hidden = true; $('gate').hidden = false;
-  if (message) { $('err').hidden = false; $('err').textContent = message; }
+  $('gateErr').hidden = !message;
+  $('gateErr').textContent = message || '';
   clearInterval(timer);
 }
 
 function showApp() {
   $('gate').hidden = true; $('app').hidden = false;
+  $('gateErr').hidden = true;
 }
 
 $('gateGo').addEventListener('click', () => {

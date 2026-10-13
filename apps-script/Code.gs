@@ -481,8 +481,8 @@ function cancelPage(id, token) {
     `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<title>Réservations Miyan</title>` +
     `<link rel="icon" type="image/png" href="${faviconDataUri_()}">` +
-    `<div style="background:${c.bg};min-height:100vh;margin:0;padding:48px 16px;font-family:Arial,Helvetica,sans-serif;box-sizing:border-box;">` +
-    `<div style="max-width:420px;margin:0 auto;background:${c.card};border-radius:16px;padding:28px 24px;border:1px solid ${c.gold};text-align:center;">` +
+    `<div style="background:${c.bg};min-height:100vh;margin:0;padding:48px 16px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-family:Arial,Helvetica,sans-serif;">` +
+    `<div style="width:100%;max-width:420px;margin:0 auto;background:${c.card};border-radius:16px;padding:28px 24px;border:1px solid ${c.gold};text-align:center;">` +
     `<img src="${logoDataUri_()}" width="48" height="48" alt="Réservations Miyan" style="display:inline-block;border-radius:10px;margin:0 0 14px;">` +
     `<div style="color:${c.ink};font-weight:900;letter-spacing:.08em;font-size:18px;margin:0 0 18px;">米安 MIYAN</div>` +
     `<p style="color:${c.ink};font-size:16px;margin:0 0 20px;">${message}</p>` +
