@@ -1,4 +1,4 @@
-# ResMiyan — outil de réservation MIYAN
+# Réservations Miyan — outil de réservation MIYAN
 
 ## Architecture
 
@@ -17,6 +17,16 @@ admin.html        ──┘        Code.gs : doGet / doPost               "Reser
 - **Apps Script** ([apps-script/Code.gs](apps-script/Code.gs)) = backend unique, exposé en Web App. Il sert les deux pages HTML et c'est lui qui décide si un créneau est encore disponible (avec un verrou pour éviter que deux réservations simultanées dépassent la jauge).
 - **reservation.html** = page client (déjà prototypée par Julien), inchangée : elle appelle l'API pour lister les créneaux puis poster la réservation.
 - **admin.html** = tableau de bord interne qui se rafraîchit automatiquement (toutes les 8 s) et met en évidence les nouvelles réservations — c'est la "page qui se met à jour" demandée dans l'échange. Un écran **Paramètres** (bouton dans la barre d'outils) permet de modifier services/horaires, jauge, jours fermés et contacts de notification directement depuis l'interface, sans ouvrir le Google Sheet.
+
+## Identité / logo
+
+- **Nom de l'app** : Réservations Miyan.
+- **Logo source** : [`Logo_Miyan.jpeg`](Logo_Miyan.jpeg) à la racine du dépôt.
+- **Déclinaisons** dans [`assets/`](assets/) (générées depuis le logo source, à régénérer si le logo change) :
+  - `favicon-32.png` / `favicon-48.png` : favicon de `reservation.html` et `admin.html`.
+  - `apple-touch-icon.png` (180×180) : icône "ajouter à l'écran d'accueil" sur iOS/Android.
+  - `logo-email.png` : logo affiché dans les emails (confirmation, notification équipe, annulation).
+- Le logo apparaît aussi comme favicon et icône d'en-tête sur la page d'annulation générée par Apps Script (`cancelPage` dans [`Code.gs`](apps-script/Code.gs)), où il est embarqué en base64 (`FAVICON_PNG_BASE64_` / `LOGO_PNG_BASE64_`) puisque cette page n'a pas accès aux fichiers du dépôt.
 
 ## Mise en place (une fois)
 
