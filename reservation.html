@@ -252,7 +252,6 @@ $('form').addEventListener('submit', async ev => {
   const lang = st.lang; // figée ici : si la langue est changée pendant l'envoi, la confirmation reste cohérente
   const firstName=$('firstName').value.trim(), lastName=$('lastName').value.trim();
   const phone=$('phone').value.trim(), email=$('email').value.trim();
-  const name = `${firstName} ${lastName}`.trim();
   const fail = (k, id) => { err.textContent=t(k); if(id) $(id).focus(); };
   if (!st.date || !st.time) return fail('eSlot');
   if (!firstName) return fail('eName','firstName');
@@ -261,7 +260,7 @@ $('form').addEventListener('submit', async ev => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('eEmail','email');
   err.textContent=''; btn.disabled=true; btn.textContent=t('sending');
   let res;
-  try { res = await api('POST',{date:st.date,time:st.time,party:st.party,name,phone,email,note:$('note').value.trim(),lang,website:$('website').value}); }
+  try { res = await api('POST',{date:st.date,time:st.time,party:st.party,firstName,lastName,phone,email,note:$('note').value.trim(),lang,website:$('website').value}); }
   catch(e) { res={ok:false}; }
   btn.disabled=false; btn.textContent=t('submit');
   if (res.ok) {

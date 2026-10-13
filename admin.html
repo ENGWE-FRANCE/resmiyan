@@ -63,7 +63,7 @@
 
     <table>
       <thead>
-        <tr><th>Heure</th><th>Service</th><th>Couverts</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Note</th><th>Statut</th></tr>
+        <tr><th>Heure</th><th>Service</th><th>Couverts</th><th>Prénom</th><th>Nom</th><th>Téléphone</th><th>Email</th><th>Note</th><th>Statut</th></tr>
       </thead>
       <tbody id="rows"></tbody>
     </table>
@@ -118,7 +118,7 @@ function render(reservations) {
     nowIds.add(r.id);
     const tr = document.createElement('tr');
     tr.className = (r.status === 'cancelled' ? 'cancelled ' : '') + (!firstLoad && !knownIds.has(r.id) ? 'fresh' : '');
-    tr.innerHTML = `<td>${r.time}</td><td>${r.service}</td><td>${r.party}</td><td>${escapeHtml(r.name)}</td>` +
+    tr.innerHTML = `<td>${r.time}</td><td>${r.service}</td><td>${r.party}</td><td>${escapeHtml(r.firstName)}</td><td>${escapeHtml(r.lastName)}</td>` +
       `<td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.note || '')}</td>` +
       `<td>${r.status === 'cancelled' ? 'Annulée' : 'Confirmée'}</td>`;
     tbody.append(tr);

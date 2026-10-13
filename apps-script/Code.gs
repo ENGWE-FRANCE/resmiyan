@@ -8,13 +8,31 @@
  *   GET  ?action=slots&date=YYYY-MM-DD&party=N -> { ok, slots:[{time,service,available}], config }
  *   GET  ?action=cancel&id=..&token=..    -> page HTML de confirmation d'annulation
  *   GET  ?action=list&key=..&date=..      -> tableau de bord admin (admin.html)
- *   POST { date, time, party, name, phone, email, note, lang, website } -> { ok, id }
+ *   POST { date, time, party, firstName, lastName, phone, email, note, lang, website } -> { ok, id }
  */
 
 const SHEET_RES = 'Reservations';
 const SHEET_CONFIG = 'Config';
 const TZ = 'Europe/Paris';
-const RES_HEADERS = ['id', 'createdAt', 'date', 'time', 'service', 'party', 'name', 'phone', 'email', 'note', 'lang', 'status', 'cancelToken'];
+const RES_HEADERS = ['id', 'createdAt', 'date', 'time', 'service', 'party', 'firstName', 'lastName', 'phone', 'email', 'note', 'lang', 'status', 'cancelToken'];
+
+// Lit la ligne d'en-têtes de "Reservations" et renvoie {nomDeColonne: index}, pour ne jamais
+// dépendre de positions figées dans le tableau (fragile si le schéma évolue).
+function resCols_(sh) {
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const idx = {};
+  headers.forEach((h, i) => { idx[h] = i; });
+  return idx;
+}
+
+// Une cellule date/heure peut être un texte ("2026-10-13") ou, si Sheets l'a réinterprétée
+// malgré le format texte brut, un vrai objet Date : on normalise toujours en chaîne comparable.
+function asDateStr_(v) {
+  return v instanceof Date ? Utilities.formatDate(v, TZ, 'yyyy-MM-dd') : String(v || '');
+}
+function asTimeStr_(v) {
+  return v instanceof Date ? Utilities.formatDate(v, TZ, 'HH:mm') : String(v || '');
+}
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
@@ -122,13 +140,13 @@ function capacityFor_(service, cfg) {
 // Total des couverts déjà confirmés pour une date+heure+service donnés.
 function bookedPartyBySlot_(dateStr) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
+  const col = resCols_(sh);
   const rows = sh.getDataRange().getValues().slice(1);
   const totals = {}; // key `${time}|${service}` -> total party
   rows.forEach(r => {
-    const [, , date, time, service, party, , , , , , status] = r;
-    if (date === dateStr && status === 'confirmed') {
-      const key = time + '|' + service;
-      totals[key] = (totals[key] || 0) + Number(party);
+    if (asDateStr_(r[col.date]) === dateStr && r[col.status] === 'confirmed') {
+      const key = asTimeStr_(r[col.time]) + '|' + r[col.service];
+      totals[key] = (totals[key] || 0) + Number(r[col.party]);
     }
   });
   return totals;
@@ -165,7 +183,8 @@ function createReservation(data) {
   const cfg = getConfig();
   const date = String(data.date || ''), time = String(data.time || '');
   const party = Number(data.party || 0);
-  const name = String(data.name || '').trim();
+  const firstName = String(data.firstName || '').trim();
+  const lastName = String(data.lastName || '').trim();
   const phone = String(data.phone || '').trim();
   const email = String(data.email || '').trim();
 
@@ -173,7 +192,7 @@ function createReservation(data) {
   if (!time || party < 1 || party > cfg.maxParty) return { ok: false, error: 'invalid' };
   const now = nowInTz_(cfg);
   if (date === now.date && time <= now.time) return { ok: false, error: 'full' };
-  if (!name) return { ok: false, error: 'invalid' };
+  if (!firstName || !lastName) return { ok: false, error: 'invalid' };
   if (phone.replace(/\D/g, '').length < 8) return { ok: false, error: 'invalid' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'invalid' };
 
@@ -190,12 +209,14 @@ function createReservation(data) {
     const id = 'MY-' + Utilities.getUuid().slice(0, 8).toUpperCase();
     const cancelToken = Utilities.getUuid();
     const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
+    // L'apostrophe force Sheets à garder date/heure en texte brut, même si le format de
+    // colonne venait à être perdu : sans ça "2026-10-13" peut être réinterprété en vraie date.
     sh.appendRow([
-      id, new Date(), date, time, service.id, party, name, phone, email,
+      id, new Date(), "'" + date, "'" + time, service.id, party, firstName, lastName, phone, email,
       String(data.note || '').trim(), String(data.lang || 'fr'), 'confirmed', cancelToken
     ]);
 
-    const r = { id, date, time, service, party, name, phone, email, note: data.note, lang: data.lang, cancelToken };
+    const r = { id, date, time, service, party, firstName, lastName, phone, email, note: data.note, lang: data.lang, cancelToken };
     sendConfirmationEmail_(cfg, r);
     sendStaffNotification_(cfg, r);
     return { ok: true, id };
@@ -228,6 +249,7 @@ function emailShell_(bodyHtml) {
 
 function sendConfirmationEmail_(cfg, r) {
   const c = EMAIL_COLORS_;
+  const fullName = `${r.firstName} ${r.lastName}`.trim();
   const cancelUrl = ScriptApp.getService().getUrl() + '?action=cancel&id=' + encodeURIComponent(r.id) + '&token=' + encodeURIComponent(r.cancelToken);
   const fr = r.lang !== 'en';
   const date = longDate_(r.date, fr);
@@ -235,12 +257,12 @@ function sendConfirmationEmail_(cfg, r) {
   const subject = (fr ? 'Votre réservation chez MIYAN - ' : 'Your MIYAN booking - ') + r.date;
 
   const body = fr
-    ? `Bonjour ${r.name},\n\nVotre table est réservée :\n${date} à ${r.time} - ${guests}\nRéférence : ${r.id}\n\nPour annuler : ${cancelUrl}\n\nÀ bientôt,\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`
-    : `Hello ${r.name},\n\nYour table is booked:\n${date} at ${r.time} - ${guests}\nReference: ${r.id}\n\nTo cancel: ${cancelUrl}\n\nSee you soon,\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`;
+    ? `Bonjour ${fullName},\n\nVotre table est réservée :\n${date} à ${r.time} - ${guests}\nRéférence : ${r.id}\n\nPour annuler : ${cancelUrl}\n\nÀ bientôt,\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`
+    : `Hello ${fullName},\n\nYour table is booked:\n${date} at ${r.time} - ${guests}\nReference: ${r.id}\n\nTo cancel: ${cancelUrl}\n\nSee you soon,\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`;
 
   const htmlBody = emailShell_(
     `<h1 style="color:${c.ink};font-size:22px;margin:0 0 14px;text-transform:uppercase;">${fr ? "C'est réservé" : "You're booked"}</h1>` +
-    `<p style="color:${c.ink};margin:0 0 16px;">${fr ? 'Bonjour' : 'Hello'} ${escapeHtml_(r.name)},</p>` +
+    `<p style="color:${c.ink};margin:0 0 16px;">${fr ? 'Bonjour' : 'Hello'} ${escapeHtml_(fullName)},</p>` +
     `<div style="background:${c.paper};border-left:4px solid ${c.gold};border-radius:8px;padding:12px 14px;color:${c.ink};font-weight:600;margin:0 0 18px;">` +
     `${date} ${fr ? 'à' : 'at'} ${r.time} - ${guests}<br>${fr ? 'Référence' : 'Reference'} : ${r.id}</div>` +
     `<p style="margin:0 0 22px;"><a href="${cancelUrl}" style="color:${c.ink};">${fr ? 'Annuler la réservation' : 'Cancel reservation'}</a></p>` +
@@ -255,11 +277,12 @@ function sendConfirmationEmail_(cfg, r) {
 function sendStaffNotification_(cfg, r) {
   if (!cfg.notifyEmails.length) return;
   const c = EMAIL_COLORS_;
+  const fullName = `${r.firstName} ${r.lastName}`.trim();
   const serviceLabel = (r.service && r.service.label) || (r.service && r.service.id) || '';
   const date = longDate_(r.date, true);
   const subject = `Nouvelle réservation - ${r.date} ${r.time} (${r.party} pers.)`;
 
-  const body = `${r.name} - ${r.phone} - ${r.email}\n${date} à ${r.time} (${serviceLabel}) - ${r.party} personne(s)\nRéférence : ${r.id}` +
+  const body = `${fullName} - ${r.phone} - ${r.email}\n${date} à ${r.time} (${serviceLabel}) - ${r.party} personne(s)\nRéférence : ${r.id}` +
     (r.note ? `\nNote : ${r.note}` : '') +
     `\n\nVoir le tableau de bord : ${ScriptApp.getService().getUrl()}`;
 
@@ -267,7 +290,7 @@ function sendStaffNotification_(cfg, r) {
     `<h1 style="color:${c.ink};font-size:20px;margin:0 0 14px;text-transform:uppercase;">Nouvelle réservation</h1>` +
     `<div style="background:${c.paper};border-left:4px solid ${c.gold};border-radius:8px;padding:12px 14px;color:${c.ink};font-weight:600;margin:0 0 16px;">` +
     `${date} à ${r.time} (${escapeHtml_(serviceLabel)}) - ${r.party} personne(s)<br>Référence : ${r.id}</div>` +
-    `<p style="color:${c.ink};margin:0 0 6px;">${escapeHtml_(r.name)} - ${escapeHtml_(r.phone)} - ${escapeHtml_(r.email)}</p>` +
+    `<p style="color:${c.ink};margin:0 0 6px;">${escapeHtml_(fullName)} - ${escapeHtml_(r.phone)} - ${escapeHtml_(r.email)}</p>` +
     (r.note ? `<p style="color:${c.ink};margin:0 0 16px;font-style:italic;">${escapeHtml_(r.note)}</p>` : '') +
     `<p style="margin:16px 0 0;"><a href="${ScriptApp.getService().getUrl()}" style="color:${c.ink};">Voir le tableau de bord</a></p>`
   );
@@ -279,13 +302,13 @@ function sendStaffNotification_(cfg, r) {
 
 function cancelPage(id, token) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
-  const range = sh.getDataRange();
-  const rows = range.getValues();
+  const col = resCols_(sh);
+  const rows = sh.getDataRange().getValues();
   let message = 'Lien invalide ou déjà utilisé.';
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === id && rows[i][12] === token) {
-      if (rows[i][11] === 'confirmed') {
-        sh.getRange(i + 1, 12).setValue('cancelled'); // colonne "status"
+    if (rows[i][col.id] === id && rows[i][col.cancelToken] === token) {
+      if (rows[i][col.status] === 'confirmed') {
+        sh.getRange(i + 1, col.status + 1).setValue('cancelled');
         message = 'Votre réservation a bien été annulée. Merci de nous avoir prévenus !';
       } else {
         message = 'Cette réservation était déjà annulée.';
@@ -307,16 +330,17 @@ function adminList(p) {
   if (!cfg.adminKey || p.key !== cfg.adminKey) return { ok: false, error: 'unauthorized' };
 
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
+  const col = resCols_(sh);
   const rows = sh.getDataRange().getValues().slice(1);
   const fromDate = p.date || isoToday_();
 
   const list = rows
-    .filter(r => r[2] >= fromDate)
     .map(r => ({
-      id: r[0], createdAt: r[1], date: r[2], time: r[3], service: r[4],
-      party: r[5], name: r[6], phone: r[7], email: r[8], note: r[9],
-      lang: r[10], status: r[11]
+      id: r[col.id], createdAt: r[col.createdAt], date: asDateStr_(r[col.date]), time: asTimeStr_(r[col.time]),
+      service: r[col.service], party: r[col.party], firstName: r[col.firstName], lastName: r[col.lastName],
+      phone: r[col.phone], email: r[col.email], note: r[col.note], lang: r[col.lang], status: r[col.status]
     }))
+    .filter(r => r.date >= fromDate)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
 
   return { ok: true, reservations: list, config: { capacityPerSlot: cfg.capacityPerSlot, services: cfg.services } };
