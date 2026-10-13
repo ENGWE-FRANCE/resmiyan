@@ -84,6 +84,16 @@ function dateInRange_(dateStr, cfg) {
   return d >= today && d <= max;
 }
 
+// Date et heure actuelles dans le fuseau du restaurant (Config.timezone), en chaînes
+// comparables directement à "date"/"time" : sert à exclure les créneaux déjà passés aujourd'hui.
+function nowInTz_(cfg) {
+  const now = new Date();
+  return {
+    date: Utilities.formatDate(now, cfg.timezone, 'yyyy-MM-dd'),
+    time: Utilities.formatDate(now, cfg.timezone, 'HH:mm')
+  };
+}
+
 function isClosed_(dateStr, cfg) {
   const d = new Date(dateStr + 'T00:00:00');
   if (cfg.closedDates.indexOf(dateStr) !== -1) return true;
@@ -130,6 +140,8 @@ function getSlots(dateStr, party) {
   if (isClosed_(dateStr, cfg)) return { ok: true, slots: [], config: publicConfig() };
 
   const booked = bookedPartyBySlot_(dateStr);
+  const now = nowInTz_(cfg);
+  const isToday = dateStr === now.date;
   const slots = [];
   cfg.services.forEach(svc => {
     timesForService_(svc, cfg.slotMinutes).forEach(time => {
@@ -137,7 +149,7 @@ function getSlots(dateStr, party) {
       slots.push({
         time,
         service: svc.id,
-        available: party <= cfg.maxParty && (used + party) <= capacityFor_(svc, cfg)
+        available: !(isToday && time <= now.time) && party <= cfg.maxParty && (used + party) <= capacityFor_(svc, cfg)
       });
     });
   });
@@ -159,6 +171,8 @@ function createReservation(data) {
 
   if (!dateInRange_(date, cfg) || isClosed_(date, cfg)) return { ok: false, error: 'closed' };
   if (!time || party < 1 || party > cfg.maxParty) return { ok: false, error: 'invalid' };
+  const now = nowInTz_(cfg);
+  if (date === now.date && time <= now.time) return { ok: false, error: 'full' };
   if (!name) return { ok: false, error: 'invalid' };
   if (phone.replace(/\D/g, '').length < 8) return { ok: false, error: 'invalid' };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'invalid' };
