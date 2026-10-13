@@ -209,6 +209,14 @@ function renderSlots() {
 }
 
 function recapText(lang) { lang = lang || st.lang; return `${longDate(st.date, lang)} ${T[lang].at} ${st.time} · ${T[lang].pers(st.party)}`; }
+
+// Réaffiche l'écran de confirmation dans la langue donnée : appelé à la fin de la réservation,
+// et de nouveau si le client change de langue alors que cet écran est déjà affiché.
+function renderDoneScreen(lang) {
+  document.querySelectorAll('#done [data-t]').forEach(e => e.textContent = T[lang][e.dataset.t]);
+  const id = st.lastBookingId;
+  $('doneRecap').textContent = recapText(lang) + (id && id !== 'OK' ? ` · ${T[lang].ref} ${id}` : '');
+}
 function renderRecap() { const r=$('recap'); r.hidden = !(st.date&&st.time); if(!r.hidden) r.textContent = recapText(); }
 
 let reqId = 0;
@@ -264,15 +272,18 @@ $('form').addEventListener('submit', async ev => {
   catch(e) { res={ok:false}; }
   btn.disabled=false; btn.textContent=t('submit');
   if (res.ok) {
-    document.querySelectorAll('#done [data-t]').forEach(e => e.textContent = T[lang][e.dataset.t]);
-    $('doneRecap').textContent = recapText(lang) + (res.id && res.id!=='OK' ? ` · ${T[lang].ref} ${res.id}` : '');
+    st.lastBookingId = res.id;
+    renderDoneScreen(lang);
     $('form').hidden=true; $('done').hidden=false; window.scrollTo({top:0});
   } else if (res.error==='full') { err.textContent=t('eFull'); loadSlots(); }
   else err.textContent=t('eNet');
 });
 
 $('otherDate').addEventListener('change', e => { if (e.target.value) pickDate(e.target.value); });
-document.querySelectorAll('.lang button').forEach(b => b.onclick = () => { st.lang=b.dataset.lang; renderTexts(); renderDays(); renderSlots(); renderRecap(); });
+document.querySelectorAll('.lang button').forEach(b => b.onclick = () => {
+  st.lang=b.dataset.lang; renderTexts(); renderDays(); renderSlots(); renderRecap();
+  if (!$('done').hidden) renderDoneScreen(st.lang);
+});
 
 $('demo').hidden = !DEMO;
 renderTexts(); renderParty(); renderDays(); renderSlots();
