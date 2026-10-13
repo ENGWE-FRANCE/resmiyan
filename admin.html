@@ -34,9 +34,12 @@
   .gate h1 { font-size:18px; margin:0 0 12px; }
   .gate input { width:100%; margin-bottom:10px; }
   .slots { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-  .slot-chip { background:var(--paper); border-radius:999px; padding:6px 12px; font-size:12.5px; font-weight:600; box-shadow:0 0 0 1px rgba(82,13,16,.18) inset; }
+  .slot-chip { background:var(--paper); color:var(--bdx); border:0; cursor:pointer; border-radius:999px; padding:6px 12px; font-size:12.5px; font-weight:600; box-shadow:0 0 0 1px rgba(82,13,16,.18) inset; }
+  .slot-chip:hover { box-shadow:0 0 0 1.5px var(--bdx) inset; }
   .slot-chip.full { background:var(--full); color:var(--cream); box-shadow:none; }
   .slot-chip.near { box-shadow:0 0 0 1px var(--gold) inset; }
+  .slot-chip.forced { outline:2px dashed var(--bdx); outline-offset:1px; }
+  .cancel-btn { background:transparent; color:var(--full); border:1px solid var(--full); border-radius:999px; padding:3px 9px; font-size:11px; font-weight:700; margin-left:8px; cursor:pointer; }
   .panel { background:var(--cream); border-radius:14px; padding:18px 16px; box-shadow:0 0 0 1px var(--gold) inset; margin-bottom:14px; }
   .panel h2 { font-size:15px; margin:0 0 14px; }
   .panel h3 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; opacity:.7; margin:18px 0 8px; }
@@ -96,11 +99,13 @@
 
       <h3>Jauge &amp; créneaux</h3>
       <div class="row-grid">
-        <div class="field"><label>Jauge par défaut (couverts par créneau)</label><input type="number" id="cfgCapacity" min="1"></div>
-        <div class="field"><label>Durée d'un créneau (minutes)</label><input type="number" id="cfgSlotMinutes" min="5" step="5"></div>
+        <div class="field"><label>Jauge par défaut (couverts max en simultané)</label><input type="number" id="cfgCapacity" min="1"></div>
+        <div class="field"><label>Durée d'un créneau affiché (minutes)</label><input type="number" id="cfgSlotMinutes" min="5" step="5"></div>
+        <div class="field"><label>Durée d'occupation d'une table (minutes)</label><input type="number" id="cfgTurnMinutes" min="15" step="15"></div>
         <div class="field"><label>Personnes max par réservation</label><input type="number" id="cfgMaxParty" min="1"></div>
         <div class="field"><label>Réservable jusqu'à (jours à l'avance)</label><input type="number" id="cfgMaxDays" min="1"></div>
       </div>
+      <p class="hint">La jauge compte les couverts encore assis au même moment : une réservation de 19h00 compte toujours dans le calcul à 19h15, 19h30… jusqu'à la fin de la durée d'occupation.</p>
 
       <h3>Jours fermés</h3>
       <div class="weekdays" id="weekdays"></div>
@@ -177,8 +182,6 @@ function summarize(reservations, cfg) {
   pill('Couverts', totalCovers);
 }
 
-// La jauge s'applique à CHAQUE créneau de 15 min séparément (pas à tout le service additionné) :
-// on affiche donc l'occupation créneau par créneau, pas un total par service.
 function timesForService(svc, slotMinutes) {
   const [sh, sm] = svc.start.split(':').map(Number);
   const [eh, em] = svc.end.split(':').map(Number);
@@ -188,22 +191,59 @@ function timesForService(svc, slotMinutes) {
   return out;
 }
 
-function renderSlotGrid(reservations, cfg) {
+function toMinutes(hhmm) { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; }
+
+// Couverts qui occupent encore une table au moment où "time" commencerait : toute réservation
+// dont la période d'occupation chevauche celle-ci compte (même logique que le serveur).
+function occupiedAt(reservations, time, serviceId, turnMinutes) {
+  const reqStart = toMinutes(time), reqEnd = reqStart + turnMinutes;
+  let total = 0;
+  reservations.forEach(r => {
+    if (r.service !== serviceId) return;
+    const bStart = toMinutes(r.time), bEnd = bStart + turnMinutes;
+    if (reqStart < bEnd && bStart < reqEnd) total += Number(r.party);
+  });
+  return total;
+}
+
+let currentDate = '';
+
+function renderSlotGrid(reservations, cfg, overrides) {
   const box = $('slotGrid'); box.textContent = '';
   const active = reservations.filter(r => r.status !== 'cancelled');
-  const booked = {};
-  active.forEach(r => { const k = r.time + '|' + r.service; booked[k] = (booked[k] || 0) + Number(r.party); });
+  const turnMinutes = cfg.turnMinutes || 90;
   (cfg.services || []).forEach(svc => {
-    const cap = svc.capacity ?? cfg.capacityPerSlot ?? 0;
+    const baseCap = svc.capacity ?? cfg.capacityPerSlot ?? 0;
     timesForService(svc, cfg.slotMinutes || 15).forEach(time => {
-      const used = booked[time + '|' + svc.id] || 0;
-      if (!used) return;
-      const chip = document.createElement('span');
-      chip.className = 'slot-chip' + (used >= cap ? ' full' : used >= cap * 0.75 ? ' near' : '');
-      chip.textContent = `${svc.label || svc.id} ${time} : ${used}/${cap}`;
+      const occupied = occupiedAt(active, time, svc.id, turnMinutes);
+      const key = time + '|' + svc.id;
+      const forced = overrides && overrides[key] != null ? overrides[key] : null;
+      const cap = forced != null ? forced : baseCap;
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'slot-chip' + (forced != null ? ' forced' : '') + (cap <= 0 || occupied >= cap ? ' full' : occupied >= cap * 0.75 ? ' near' : '');
+      chip.textContent = `${svc.label || svc.id} ${time} : ${occupied}/${cap}${forced != null ? ' 🔒' : ''}`;
+      chip.addEventListener('click', () => openOverrideEditor(time, svc, occupied, baseCap, forced));
       box.append(chip);
     });
   });
+}
+
+async function openOverrideEditor(time, svc, occupied, baseCap, forced) {
+  const label = `${svc.label || svc.id} ${time}`;
+  const current = forced != null ? forced : '';
+  const input = window.prompt(
+    `${label}\nOccupation actuelle : ${occupied} couvert(s)\nJauge normale : ${baseCap}\n\n` +
+    `Entrez une jauge à forcer pour ce créneau précis (0 = marquer complet), ou laissez vide pour effacer un forçage existant et revenir à l'automatique :`,
+    current
+  );
+  if (input === null) return; // annulé
+  const res = await fetch(API_URL, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'setOverride', key: adminKey, date: currentDate, time, service: svc.id, capacity: input.trim() })
+  }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+  if (!res.ok) { alert('Erreur : ' + res.error); return; }
+  poll();
 }
 
 function render(reservations) {
@@ -214,19 +254,35 @@ function render(reservations) {
     nowIds.add(r.id);
     const tr = document.createElement('tr');
     tr.className = (r.status === 'cancelled' ? 'cancelled ' : '') + (!firstLoad && !knownIds.has(r.id) ? 'fresh' : '');
+    const statusCell = r.status === 'cancelled'
+      ? 'Annulée'
+      : `Confirmée <button type="button" class="cancel-btn" data-id="${escapeHtml(r.id)}">Annuler</button>`;
     tr.innerHTML = `<td>${r.time}</td><td>${r.service}</td><td>${r.party}</td><td>${escapeHtml(r.firstName)}</td><td>${escapeHtml(r.lastName)}</td>` +
       `<td>${escapeHtml(r.phone)}</td><td>${escapeHtml(r.email)}</td><td>${escapeHtml(r.note || '')}</td>` +
-      `<td>${r.status === 'cancelled' ? 'Annulée' : 'Confirmée'}</td>`;
+      `<td>${statusCell}</td>`;
     tbody.append(tr);
   });
+  tbody.querySelectorAll('.cancel-btn').forEach(btn => btn.addEventListener('click', () => adminCancel(btn.dataset.id)));
   knownIds = nowIds;
   firstLoad = false;
+}
+
+async function adminCancel(id) {
+  const reason = window.prompt('Motif de l\'annulation (facultatif, envoyé au client par email) :', '');
+  if (reason === null) return; // annulé
+  const res = await fetch(API_URL, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: 'adminCancel', key: adminKey, id, reason: reason.trim() })
+  }).then(r => r.json()).catch(() => ({ ok: false, error: 'network' }));
+  if (!res.ok) { alert('Erreur : ' + res.error); return; }
+  poll();
 }
 
 function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
 
 async function poll() {
   try {
+    currentDate = $('date').value || isoToday();
     const res = await fetchList();
     if (!res.ok) {
       if (res.error === 'unauthorized') return showGate('Clé admin incorrecte.');
@@ -236,7 +292,7 @@ async function poll() {
     $('err').hidden = true;
     render(res.reservations);
     summarize(res.reservations, res.config || {});
-    renderSlotGrid(res.reservations, res.config || {});
+    renderSlotGrid(res.reservations, res.config || {}, res.overrides || {});
     setStatus('', 'À jour · ' + new Date().toLocaleTimeString('fr-FR'));
   } catch (e) {
     setStatus('err', 'Connexion impossible');
@@ -376,6 +432,7 @@ async function loadSettings() {
   settings.hoursOverrides = JSON.parse(JSON.stringify(c.hoursOverrides || {}));
   $('cfgCapacity').value = c.capacityPerSlot ?? '';
   $('cfgSlotMinutes').value = c.slotMinutes ?? '';
+  $('cfgTurnMinutes').value = c.turnMinutes ?? '';
   $('cfgMaxParty').value = c.maxParty ?? '';
   $('cfgMaxDays').value = c.maxDays ?? '';
   $('cfgClosedDates').value = c.closedDates || '';
@@ -391,6 +448,7 @@ async function saveSettings() {
   const config = {
     capacityPerSlot: Number($('cfgCapacity').value || 0),
     slotMinutes: Number($('cfgSlotMinutes').value || 15),
+    turnMinutes: Number($('cfgTurnMinutes').value || 90),
     maxParty: Number($('cfgMaxParty').value || 1),
     maxDays: Number($('cfgMaxDays').value || 1),
     closedDates: $('cfgClosedDates').value.trim(),

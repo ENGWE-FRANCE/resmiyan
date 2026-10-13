@@ -11,10 +11,13 @@
  *   GET  ?action=config&key=..            -> config complète (admin.html, écran Paramètres)
  *   POST { date, time, party, firstName, lastName, phone, email, note, lang, website } -> { ok, id }
  *   POST { action:'updateConfig', key, config:{...} } -> { ok } (admin.html, écran Paramètres)
+ *   POST { action:'setOverride', key, date, time, service, capacity } -> { ok } (forcer/lever un créneau)
+ *   POST { action:'adminCancel', key, id, reason } -> { ok } (annulation côté restaurant, email au client)
  */
 
 const SHEET_RES = 'Reservations';
 const SHEET_CONFIG = 'Config';
+const SHEET_OVERRIDES = 'Overrides';
 const TZ = 'Europe/Paris';
 const RES_HEADERS = ['id', 'createdAt', 'date', 'time', 'service', 'party', 'firstName', 'lastName', 'phone', 'email', 'note', 'lang', 'status', 'cancelToken'];
 
@@ -53,6 +56,8 @@ function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
     if (data.action === 'updateConfig') return json(updateConfig_(data));
+    if (data.action === 'setOverride') return json(setOverride_(data));
+    if (data.action === 'adminCancel') return json(adminCancelReservation_(data));
     return json(createReservation(data));
   } catch (err) {
     return json({ ok: false, error: String(err && err.message || err) });
@@ -90,7 +95,12 @@ function getConfig() {
     // { "<0-6>": { "<idService>": {start,end} } }. Un jour/service absent garde l'horaire par défaut.
     hoursOverrides: JSON.parse(c.hoursOverrides || '{}'),
     adminKey: String(c.adminKey || ''),
-    notifyEmails: String(c.notifyEmails || c.email || '').split(',').map(s => s.trim()).filter(Boolean)
+    notifyEmails: String(c.notifyEmails || c.email || '').split(',').map(s => s.trim()).filter(Boolean),
+    // Durée pendant laquelle une table reste occupée après l'heure de réservation : une jauge
+    // "par créneau" n'a de sens que si on tient compte des réservations des créneaux voisins
+    // qui occupent encore une table (sinon un même covert pourrait être compté comme libre
+    // à chaque créneau de 15 min, alors qu'un repas dure bien plus longtemps).
+    turnMinutes: Number(c.turnMinutes || 90)
   };
 }
 
@@ -155,19 +165,79 @@ function capacityFor_(service, cfg) {
   return service.capacity != null ? Number(service.capacity) : cfg.capacityPerSlot;
 }
 
-// Total des couverts déjà confirmés pour une date+heure+service donnés.
-function bookedPartyBySlot_(dateStr) {
+function toMinutes_(hhmm) {
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return h * 60 + m;
+}
+
+// Réservations confirmées d'une date, prêtes pour le calcul de chevauchement (une seule
+// lecture de la feuille, réutilisée pour tous les créneaux d'un même appel).
+function confirmedReservations_(dateStr) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
   const col = resCols_(sh);
-  const rows = sh.getDataRange().getValues().slice(1);
-  const totals = {}; // key `${time}|${service}` -> total party
-  rows.forEach(r => {
-    if (asDateStr_(r[col.date]) === dateStr && r[col.status] === 'confirmed') {
-      const key = asTimeStr_(r[col.time]) + '|' + r[col.service];
-      totals[key] = (totals[key] || 0) + Number(r[col.party]);
-    }
+  return sh.getDataRange().getValues().slice(1)
+    .filter(r => asDateStr_(r[col.date]) === dateStr && r[col.status] === 'confirmed')
+    .map(r => ({ time: asTimeStr_(r[col.time]), service: r[col.service], party: Number(r[col.party]) }));
+}
+
+// Couverts qui occupent encore une table au moment où une réservation à "time" commencerait et
+// durerait "turnMinutes" : toute réservation existante dont la période d'occupation chevauche
+// celle-ci compte, pas seulement celles à l'heure exacte "time".
+function occupiedAt_(reservations, time, serviceId, turnMinutes) {
+  const reqStart = toMinutes_(time), reqEnd = reqStart + turnMinutes;
+  let total = 0;
+  reservations.forEach(r => {
+    if (r.service !== serviceId) return;
+    const bStart = toMinutes_(r.time), bEnd = bStart + turnMinutes;
+    if (reqStart < bEnd && bStart < reqEnd) total += r.party;
   });
-  return totals;
+  return total;
+}
+
+// Forçages manuels (admin) pour une date : clé "time|service" -> jauge imposée pour ce
+// créneau précis (0 = marqué complet, une valeur plus haute = places libérées manuellement).
+function overridesForDate_(dateStr) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_OVERRIDES);
+  if (!sh) return {};
+  const rows = sh.getDataRange().getValues().slice(1);
+  const map = {};
+  rows.forEach(r => {
+    if (asDateStr_(r[0]) === dateStr) map[asTimeStr_(r[1]) + '|' + r[2]] = Number(r[3]);
+  });
+  return map;
+}
+
+// Jauge effective d'un créneau : le forçage manuel s'il existe, sinon la jauge normale du service.
+function effectiveCapacity_(time, service, overrides, cfg) {
+  const key = time + '|' + service.id;
+  return overrides[key] != null ? overrides[key] : capacityFor_(service, cfg);
+}
+
+// Pose ou retire un forçage manuel sur un créneau précis (admin.html, grille d'occupation).
+// capacity vide/null -> retire le forçage (retour à la jauge automatique).
+function setOverride_(data) {
+  const cfg = getConfig();
+  if (!cfg.adminKey || data.key !== cfg.adminKey) return { ok: false, error: 'unauthorized' };
+
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_OVERRIDES);
+  const rows = sh.getDataRange().getValues();
+  const date = String(data.date || ''), time = String(data.time || ''), service = String(data.service || '');
+  let rowIndex = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (asDateStr_(rows[i][0]) === date && asTimeStr_(rows[i][1]) === time && rows[i][2] === service) { rowIndex = i; break; }
+  }
+
+  if (data.capacity === '' || data.capacity == null) {
+    if (rowIndex !== -1) sh.deleteRow(rowIndex + 1);
+    return { ok: true };
+  }
+
+  if (rowIndex !== -1) {
+    sh.getRange(rowIndex + 1, 4).setValue(Number(data.capacity));
+  } else {
+    sh.appendRow(["'" + date, "'" + time, service, Number(data.capacity), new Date()]);
+  }
+  return { ok: true };
 }
 
 function getSlots(dateStr, party) {
@@ -175,17 +245,19 @@ function getSlots(dateStr, party) {
   if (!dateStr || !dateInRange_(dateStr, cfg)) return { ok: true, slots: [], config: publicConfig() };
   if (isClosed_(dateStr, cfg)) return { ok: true, slots: [], config: publicConfig() };
 
-  const booked = bookedPartyBySlot_(dateStr);
+  const reservations = confirmedReservations_(dateStr);
+  const overrides = overridesForDate_(dateStr);
   const now = nowInTz_(cfg);
   const isToday = dateStr === now.date;
   const slots = [];
   servicesForDate_(dateStr, cfg).forEach(svc => {
     timesForService_(svc, cfg.slotMinutes).forEach(time => {
-      const used = booked[time + '|' + svc.id] || 0;
+      const occupied = occupiedAt_(reservations, time, svc.id, cfg.turnMinutes);
+      const cap = effectiveCapacity_(time, svc, overrides, cfg);
       slots.push({
         time,
         service: svc.id,
-        available: !(isToday && time <= now.time) && party <= cfg.maxParty && (used + party) <= capacityFor_(svc, cfg)
+        available: !(isToday && time <= now.time) && party <= cfg.maxParty && (occupied + party) <= cap
       });
     });
   });
@@ -220,9 +292,9 @@ function createReservation(data) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    const booked = bookedPartyBySlot_(date);
-    const used = booked[time + '|' + service.id] || 0;
-    if (used + party > capacityFor_(service, cfg)) return { ok: false, error: 'full' };
+    const occupied = occupiedAt_(confirmedReservations_(date), time, service.id, cfg.turnMinutes);
+    const cap = effectiveCapacity_(time, service, overridesForDate_(date), cfg);
+    if (occupied + party > cap) return { ok: false, error: 'full' };
 
     const id = 'MY-' + Utilities.getUuid().slice(0, 8).toUpperCase();
     const cancelToken = Utilities.getUuid();
@@ -318,6 +390,58 @@ function sendStaffNotification_(cfg, r) {
 
 /* ───────────────────────── Annulation ───────────────────────── */
 
+// Annulation côté restaurant (admin.html) : contrairement au lien client, celle-ci envoie un
+// email au client avec un motif éventuel.
+function adminCancelReservation_(data) {
+  const cfg = getConfig();
+  if (!cfg.adminKey || data.key !== cfg.adminKey) return { ok: false, error: 'unauthorized' };
+
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
+  const col = resCols_(sh);
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][col.id] !== data.id) continue;
+    if (rows[i][col.status] !== 'confirmed') return { ok: false, error: 'already_cancelled' };
+
+    sh.getRange(i + 1, col.status + 1).setValue('cancelled');
+    const r = {
+      id: rows[i][col.id], date: asDateStr_(rows[i][col.date]), time: asTimeStr_(rows[i][col.time]),
+      party: rows[i][col.party], firstName: rows[i][col.firstName], lastName: rows[i][col.lastName],
+      email: rows[i][col.email], lang: rows[i][col.lang]
+    };
+    sendAdminCancellationEmail_(cfg, r, String(data.reason || '').trim());
+    return { ok: true };
+  }
+  return { ok: false, error: 'not_found' };
+}
+
+function sendAdminCancellationEmail_(cfg, r, reason) {
+  const c = EMAIL_COLORS_;
+  const fullName = `${r.firstName} ${r.lastName}`.trim();
+  const fr = r.lang !== 'en';
+  const date = longDate_(r.date, fr);
+  const guests = fr ? (r.party > 1 ? `${r.party} personnes` : '1 personne') : (r.party > 1 ? `${r.party} guests` : '1 guest');
+  const subject = (fr ? 'Votre réservation chez MIYAN a été annulée - ' : 'Your MIYAN booking was cancelled - ') + r.date;
+
+  const reasonLine = reason ? (fr ? `\nMotif : ${reason}` : `\nReason: ${reason}`) : '';
+  const body = fr
+    ? `Bonjour ${fullName},\n\nNous sommes désolés, votre réservation du ${date} à ${r.time} (${guests}) a dû être annulée par le restaurant.${reasonLine}\n\nPour toute question : ${cfg.email}\n\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`
+    : `Hello ${fullName},\n\nWe're sorry, your booking on ${date} at ${r.time} (${guests}) had to be cancelled by the restaurant.${reasonLine}\n\nFor any question: ${cfg.email}\n\nMIYAN - 62 rue du Faubourg Montmartre, 75009 Paris`;
+
+  const htmlBody = emailShell_(
+    `<h1 style="color:${c.ink};font-size:20px;margin:0 0 14px;text-transform:uppercase;">${fr ? 'Réservation annulée' : 'Booking cancelled'}</h1>` +
+    `<p style="color:${c.ink};margin:0 0 16px;">${fr ? 'Bonjour' : 'Hello'} ${escapeHtml_(fullName)},</p>` +
+    `<p style="color:${c.ink};margin:0 0 16px;">${fr ? 'Nous sommes désolés, la réservation suivante a dû être annulée par le restaurant' : 'We are sorry, the following booking had to be cancelled by the restaurant'} :</p>` +
+    `<div style="background:${c.paper};border-left:4px solid ${c.gold};border-radius:8px;padding:12px 14px;color:${c.ink};font-weight:600;margin:0 0 18px;">` +
+    `${date} ${fr ? 'à' : 'at'} ${r.time} - ${guests}` +
+    (reason ? `<br><span style="font-weight:400;font-style:italic;">${fr ? 'Motif' : 'Reason'} : ${escapeHtml_(reason)}</span>` : '') +
+    `</div>` +
+    `<p style="color:${c.ink};margin:0;font-size:13px;">${fr ? 'Pour toute question' : 'For any question'} : <a href="mailto:${cfg.email}" style="color:${c.ink};">${cfg.email}</a></p>`
+  );
+
+  MailApp.sendEmail({ to: r.email, replyTo: cfg.email || undefined, subject, body, htmlBody });
+}
+
 function cancelPage(id, token) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_RES);
   const col = resCols_(sh);
@@ -363,10 +487,15 @@ function adminList(p) {
       service: r[col.service], party: r[col.party], firstName: r[col.firstName], lastName: r[col.lastName],
       phone: r[col.phone], email: r[col.email], note: r[col.note], lang: r[col.lang], status: r[col.status]
     }))
-    .filter(r => r.date >= fromDate)
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+    .filter(r => r.date === fromDate) // la grille d'occupation et les forçages sont par date précise
+    .sort((a, b) => a.time.localeCompare(b.time));
 
-  return { ok: true, reservations: list, config: { capacityPerSlot: cfg.capacityPerSlot, services: servicesForDate_(fromDate, cfg), slotMinutes: cfg.slotMinutes } };
+  return {
+    ok: true,
+    reservations: list,
+    config: { capacityPerSlot: cfg.capacityPerSlot, services: servicesForDate_(fromDate, cfg), slotMinutes: cfg.slotMinutes, turnMinutes: cfg.turnMinutes },
+    overrides: overridesForDate_(fromDate)
+  };
 }
 
 // Config complète éditable (sans adminKey) pour l'écran Paramètres de admin.html.
@@ -377,7 +506,7 @@ function adminConfig(p) {
     ok: true,
     config: {
       maxParty: cfg.maxParty, maxDays: cfg.maxDays, phone: cfg.phone, email: cfg.email,
-      notifyEmails: cfg.notifyEmails.join(', '), slotMinutes: cfg.slotMinutes,
+      notifyEmails: cfg.notifyEmails.join(', '), slotMinutes: cfg.slotMinutes, turnMinutes: cfg.turnMinutes,
       capacityPerSlot: cfg.capacityPerSlot, services: cfg.services,
       closedWeekdays: cfg.closedWeekdays, closedDates: cfg.closedDates.join(', '),
       hoursOverrides: cfg.hoursOverrides
@@ -407,6 +536,7 @@ function updateConfig_(data) {
   if (c.notifyEmails != null) setKV('notifyEmails', String(c.notifyEmails));
   if (c.slotMinutes != null) setKV('slotMinutes', Number(c.slotMinutes));
   if (c.capacityPerSlot != null) setKV('capacityPerSlot', Number(c.capacityPerSlot));
+  if (c.turnMinutes != null) setKV('turnMinutes', Number(c.turnMinutes));
   if (c.services != null) setKV('servicesJson', JSON.stringify(c.services));
   if (c.closedWeekdays != null) setKV('closedWeekdays', JSON.stringify(c.closedWeekdays));
   if (c.closedDates != null) setKV('closedDates', String(c.closedDates));
@@ -455,6 +585,7 @@ function setupSpreadsheet() {
       ['timezone', 'Europe/Paris'],
       ['slotMinutes', 15],
       ['capacityPerSlot', 20],
+      ['turnMinutes', 90],
       ['servicesJson', '[{"id":"midi","label":"Midi","start":"11:30","end":"15:00"},{"id":"soir","label":"Soir","start":"18:00","end":"23:00"}]'],
       ['closedWeekdays', '[0]'],
       ['closedDates', ''],
@@ -463,8 +594,13 @@ function setupSpreadsheet() {
     ].forEach(row => cfg.appendRow(row));
   }
 
+  let ov = ss.getSheetByName(SHEET_OVERRIDES);
+  if (!ov) ov = ss.insertSheet(SHEET_OVERRIDES);
+  if (ov.getLastRow() === 0) ov.appendRow(['date', 'time', 'service', 'capacity', 'createdAt']);
+  ov.getRange('A:B').setNumberFormat('@');
+
   try {
-    SpreadsheetApp.getUi().alert('Feuilles "Reservations" et "Config" prêtes. Ouvrez l\'onglet Config pour ajuster adminKey, email, phone, capacité, etc.');
+    SpreadsheetApp.getUi().alert('Feuilles "Reservations", "Config" et "Overrides" prêtes. Ouvrez l\'onglet Config pour ajuster adminKey, email, phone, capacité, etc.');
   } catch (e) {
     // getUi() échoue si le classeur n'est pas ouvert dans un onglet — sans conséquence, le setup est déjà fait.
   }
