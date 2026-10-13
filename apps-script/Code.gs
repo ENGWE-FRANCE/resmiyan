@@ -282,6 +282,9 @@ function setupSpreadsheet() {
 
   let cfg = ss.getSheetByName(SHEET_CONFIG);
   if (!cfg) cfg = ss.insertSheet(SHEET_CONFIG);
+  // Colonne B en texte brut : sinon Sheets essaie d'interpréter "+33 1 00 00 00 00"
+  // (phone) comme une formule et affiche #ERROR!.
+  cfg.getRange('B:B').setNumberFormat('@');
   if (cfg.getLastRow() === 0) {
     cfg.appendRow(['key', 'value']);
     [
